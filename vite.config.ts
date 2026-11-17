@@ -3,7 +3,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
-// base: './' → funktioniert unter https://<user>.github.io/<repo>/ genauso wie auf Netlify.
+// base: './' → funktioniert unter https://<user>.github.io/<repo>/ (GitHub Pages).
 export default defineConfig({
   base: './',
   plugins: [

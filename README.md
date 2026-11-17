@@ -17,11 +17,11 @@ npm run preview    # Build lokal ansehen
 npm run report     # Runden-Tabelle für alle Spieler/Platz/Dauer-Kombinationen
 ```
 
-## Kostenlos veröffentlichen
+## Kostenlos veröffentlichen (GitHub Pages)
 
-Die App ist eine rein statische Seite. Wähle **eine** der beiden Varianten.
+Die App ist eine rein statische Seite und wird über GitHub Pages gehostet.
 
-### Variante A: GitHub Pages
+### Einrichtung
 
 1. Lege auf [github.com](https://github.com) ein neues Repository an (z. B. `padel-americano`). Wähle **Public**: GitHub Pages ist im Gratis-Konto nur für öffentliche Repos verfügbar.
 2. Lade den Projektordner hoch (ohne `node_modules` und `dist`):
@@ -37,12 +37,17 @@ Die App ist eine rein statische Seite. Wähle **eine** der beiden Varianten.
 4. Der Workflow `.github/workflows/deploy.yml` läuft automatisch bei jedem Push. Er testet, baut und veröffentlicht die App. Den Fortschritt siehst du unter **Actions**.
 5. Danach ist die App erreichbar unter `https://<dein-name>.github.io/padel-americano/`.
 
-### Variante B: Netlify
+### Änderungen veröffentlichen
 
-1. Auf [netlify.com](https://www.netlify.com) kostenlos anmelden.
-2. **Add new site → Import an existing project** wählen und das GitHub-Repository verbinden. Build-Befehl und Ordner kommen automatisch aus `netlify.toml`.
-   - Ohne GitHub geht es auch: lokal `npm run build` ausführen und den Ordner `dist` auf [app.netlify.com/drop](https://app.netlify.com/drop) ziehen.
-3. Netlify zeigt dir die URL an (z. B. `https://padel-americano.netlify.app`). Unter *Site configuration* kannst du den Namen ändern.
+Nach jeder Änderung im Projektordner:
+
+```bash
+git add .
+git commit -m "Kurze Beschreibung der Änderung"
+git push
+```
+
+Der Workflow testet, baut und veröffentlicht die neue Version automatisch.
 
 ## Auf dem Handy installieren
 
