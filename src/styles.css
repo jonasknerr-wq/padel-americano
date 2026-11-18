@@ -118,11 +118,12 @@ p {
  * App-Rahmen: Kopfzeile / Scrollbereich / Fußleiste – von ALLEN Bildschirmen über
  * components/Layout.tsx genutzt.
  *
- * iOS-PWA-Eigenheit: Die Höhe kommt aus --app-h (src/viewport.ts), NICHT aus
- * 100vh/100dvh/100%. Mit black-translucent melden die auf dem iPhone die Höhe ohne
- * Statusleiste, der Rahmen wäre ~59 pt zu kurz (schwarzer Streifen unter der Leiste).
- * Die Leiste unten ist das letzte Flex-Element des Rahmens und sitzt damit genau an
- * dessen Unterkante = Bildschirmunterkante.
+ * iOS-PWA-Eigenheit (Details in src/viewport.ts): Die Höhe kommt aus --app-h =
+ * die von iOS gemeldete Höhe. Auf dem iPhone mit black-translucent ist die ~59 pt
+ * kürzer als der Bildschirm, und UNTERHALB zeichnet iOS keine Elemente, nur den
+ * html/body-Hintergrund. Deshalb den Rahmen NICHT auf Bildschirmhöhe strecken (dann
+ * wird die Leiste unten abgeschnitten), sondern den Streifen über die Hintergrundfarbe
+ * (= Leistenfarbe) füllen. Die Leiste ist das letzte Flex-Element des Rahmens.
  */
 .shell {
   position: fixed;
@@ -161,12 +162,18 @@ p {
   -webkit-overflow-scrolling: touch;
   padding: 12px 0 16px;
 }
-/* Untere Leiste: der Home-Indicator-Bereich (safe-area-inset-bottom) bekommt die Leistenfarbe. */
+/*
+ * Untere Leiste: Abstand für die Home-Indicator-Linie (safe-area-inset-bottom).
+ * iOS-PWA-Eigenheit: Liegt unter dem Rahmen schon der iOS-Streifen (--ios-gap, in
+ * Leistenfarbe), deckt der die Linie bereits ab → nur den Rest als Abstand nehmen,
+ * sonst hat die Leiste unten unnötig viel Leerraum.
+ */
 .shell-footer {
   flex: none;
   background: var(--surface);
   border-top: 1px solid var(--border);
   padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: max(0px, calc(env(safe-area-inset-bottom) - var(--ios-gap, 0px)));
 }
 .app-header {
   display: flex;
@@ -823,9 +830,9 @@ summary {
   font-size: 1.3rem;
 }
 
-/* Overlays */
-/* Overlays: gleiche Höhe wie der App-Rahmen (--app-h), nicht inset:0 – sonst endet das
-   Ergebnis-Blatt auf dem iPhone ~59 pt über dem Bildschirmrand (siehe src/viewport.ts). */
+/* Overlays: gleiche Höhe wie der App-Rahmen (--app-h, siehe src/viewport.ts). Auf dem
+   iPhone liegt darunter der iOS-Streifen in Leistenfarbe; das Ergebnis-Blatt hat dieselbe
+   Farbe und wirkt dadurch bis zum Rand durchgehend. */
 .overlay {
   position: fixed;
   top: 0;
@@ -838,7 +845,7 @@ summary {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, calc(env(safe-area-inset-bottom) - var(--ios-gap, 0px)));
 }
 .overlay-bottom {
   align-items: flex-end;
@@ -864,7 +871,7 @@ summary {
   border-radius: 20px 20px 0 0;
   width: 100%;
   max-width: 640px;
-  padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
+  padding: 12px 16px calc(16px + max(0px, env(safe-area-inset-bottom) - var(--ios-gap, 0px)));
   max-height: 92vh;
   max-height: calc(var(--app-h, 100dvh) - env(safe-area-inset-top) - 16px);
   overflow-y: auto;
