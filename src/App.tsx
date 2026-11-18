@@ -51,7 +51,7 @@ function Shell({ state, update }: { state: AppState; update: (fn: (s: AppState) 
     const ok = await ask({
       title: 'Neues Turnier?',
       text: <p>Der aktuelle Stand mit allen Ergebnissen wird gelöscht. Die Spielernamen bleiben für das Setup erhalten.</p>,
-      confirm: 'Löschen & neu',
+      confirm: 'Löschen und neu starten',
       danger: true,
     });
     if (!ok || !t) return;

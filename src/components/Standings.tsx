@@ -32,7 +32,7 @@ export function StandingsTable({ rows, inactive }: { rows: StandingRow[]; inacti
               <td className="num rank">{r.rank}.</td>
               <td className="left name">
                 {r.name}
-                {inactive.has(r.id) && <span className="tag">raus</span>}
+                {inactive.has(r.id) && <span className="tag">ausgefallen</span>}
               </td>
               <td className="num">{r.matches}</td>
               <td className="num nowrap">

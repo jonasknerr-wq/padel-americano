@@ -132,7 +132,7 @@ export function Players({ t, theme, setTheme, onDrop, onDropAndFinish, onAdd, on
           >
             <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Nachzügler" aria-label="Name Nachzügler" maxLength={24} />
             <button className="btn btn-primary" type="submit">
-              Dazu
+              Hinzufügen
             </button>
           </form>
         )}
@@ -158,13 +158,13 @@ export function Players({ t, theme, setTheme, onDrop, onDropAndFinish, onAdd, on
       <section className="card">
         <h2>Turnier</h2>
         <p className="muted small">
-          {t.plan.rounds} Runden à {t.plan.roundMinutes} Min · Punktsumme {t.settings.pointSum} · Seed {t.seed}
+          {t.plan.rounds} Runden à {t.plan.roundMinutes} Min. · Punktsumme {t.settings.pointSum} · Seed {t.seed}
         </p>
         <div className="stack">
           <button
             className="btn"
             onClick={async () => {
-              if (await ask({ title: 'Turnier jetzt beenden?', text: <p>Runden ohne Ergebnis entfallen. Du kannst danach zurück.</p>, confirm: 'Beenden' }))
+              if (await ask({ title: 'Turnier jetzt beenden?', text: <p>Runden ohne Ergebnis entfallen. Du kannst danach zum Turnier zurückkehren.</p>, confirm: 'Beenden' }))
                 onFinish();
             }}
           >

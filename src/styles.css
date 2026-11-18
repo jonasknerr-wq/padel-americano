@@ -63,16 +63,23 @@
 * {
   box-sizing: border-box;
 }
+/*
+ * iOS-PWA-Eigenheit: html/body bekommen eine EINFARBIGE Hintergrundfarbe in der
+ * Farbe der unteren Leiste (Hell und Dunkel über die Variablen). Falls iOS unter dem
+ * App-Rahmen doch einen Rest frei lässt, sieht man dort Leistenfarbe statt Schwarz.
+ * Kein Farbverlauf: Ein Verlauf ist nur so hoch wie html und wiederholt sich darunter
+ * von oben – genau so entstand der schwarze Streifen.
+ */
 html {
   -webkit-text-size-adjust: 100%;
   height: 100%;
-  /* Falls iOS doch einen Spalt unter der Leiste zeigt: unten Leistenfarbe, oben Seitenfarbe */
-  background: linear-gradient(to bottom, var(--bg) 50%, var(--surface) 50%);
+  background-color: var(--surface);
 }
 body {
   margin: 0;
   height: 100%;
-  overflow: hidden; /* das Dokument scrollt nie, nur .shell-main */
+  background-color: var(--surface);
+  overflow: hidden; /* das Dokument scrollt nie, nur .shell-main – sonst verschiebt iOS beim Bounce Kopf und Leiste */
   overscroll-behavior: none;
   color: var(--text);
   font: 17px/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -107,14 +114,23 @@ p {
   margin: 0.5rem 0;
 }
 
-/* App-Rahmen: Kopfzeile / Scrollbereich / Fußleiste */
+/*
+ * App-Rahmen: Kopfzeile / Scrollbereich / Fußleiste – von ALLEN Bildschirmen über
+ * components/Layout.tsx genutzt.
+ *
+ * iOS-PWA-Eigenheit: Die Höhe kommt aus --app-h (src/viewport.ts), NICHT aus
+ * 100vh/100dvh/100%. Mit black-translucent melden die auf dem iPhone die Höhe ohne
+ * Statusleiste, der Rahmen wäre ~59 pt zu kurz (schwarzer Streifen unter der Leiste).
+ * Die Leiste unten ist das letzte Flex-Element des Rahmens und sitzt damit genau an
+ * dessen Unterkante = Bildschirmunterkante.
+ */
 .shell {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  height: 100vh; /* Fallback für alte Browser */
-  height: 100dvh;
+  height: 100vh; /* nur Fallback, falls JavaScript --app-h noch nicht gesetzt hat */
+  height: var(--app-h, 100dvh);
   display: flex;
   flex-direction: column;
   background: var(--bg);
@@ -125,10 +141,16 @@ p {
   padding-left: max(16px, env(safe-area-inset-left));
   padding-right: max(16px, env(safe-area-inset-right));
 }
+/*
+ * Kopfzeile: fester, deckender Hintergrund (kein Blur/Verlauf/Transparenz).
+ * padding-top enthält die Statusleiste GENAU EINMAL (env(safe-area-inset-top)) plus
+ * 10px Luft: iOS legt bei black-translucent einen eigenen Weichzeichner knapp unter
+ * die Statusleiste – der Titel soll davon nicht mehr erfasst werden.
+ */
 .shell-header {
   flex: none;
   background: var(--bg);
-  padding-top: env(safe-area-inset-top);
+  padding-top: calc(env(safe-area-inset-top) + 10px);
   border-bottom: 1px solid var(--border);
 }
 .shell-main {
@@ -139,6 +161,7 @@ p {
   -webkit-overflow-scrolling: touch;
   padding: 12px 0 16px;
 }
+/* Untere Leiste: der Home-Indicator-Bereich (safe-area-inset-bottom) bekommt die Leistenfarbe. */
 .shell-footer {
   flex: none;
   background: var(--surface);
@@ -238,8 +261,14 @@ p {
 .btn:active:not(:disabled) {
   transform: scale(0.98);
 }
-.btn:disabled {
-  opacity: 0.45;
+/* Deaktiviert: klare, kontrastreiche Darstellung statt halbtransparent (wirkte auf dem iPhone verwaschen). */
+.btn:disabled,
+.btn-primary:disabled,
+.btn-accent:disabled {
+  background: transparent;
+  border-color: var(--border);
+  border-style: dashed;
+  color: var(--muted);
   cursor: default;
 }
 .btn-primary {
@@ -428,7 +457,7 @@ summary {
 .unit {
   color: var(--muted);
   font-size: 0.85rem;
-  width: 28px;
+  width: 34px;
 }
 .preview-head {
   display: flex;
@@ -795,9 +824,15 @@ summary {
 }
 
 /* Overlays */
+/* Overlays: gleiche Höhe wie der App-Rahmen (--app-h), nicht inset:0 – sonst endet das
+   Ergebnis-Blatt auf dem iPhone ~59 pt über dem Bildschirmrand (siehe src/viewport.ts). */
 .overlay {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100vh;
+  height: var(--app-h, 100dvh);
   z-index: 50;
   background: rgb(0 0 0 / 0.55);
   display: flex;
@@ -831,7 +866,7 @@ summary {
   max-width: 640px;
   padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
   max-height: 92vh;
-  max-height: calc(100dvh - env(safe-area-inset-top) - 16px);
+  max-height: calc(var(--app-h, 100dvh) - env(safe-area-inset-top) - 16px);
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -952,4 +987,10 @@ summary {
 .place-3 .podium-block {
   height: 64px;
   background: #e0b48a;
+}
+/* „ausgefallen“ unter den Namen statt daneben, damit lange Namen nicht abgeschnitten werden */
+.standings .name .tag {
+  display: block;
+  width: fit-content;
+  margin: 2px 0 0;
 }

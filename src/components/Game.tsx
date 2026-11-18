@@ -36,7 +36,7 @@ export function Game({ t, cfg, now, setTimer, openResult, onFinish }: Props) {
     timer.phase === 'warmup'
       ? 'Einspielen'
       : timer.phase === 'change'
-        ? `Wechsel – gleich Runde ${timer.round + 1}`
+        ? `Wechsel – gleich beginnt Runde ${timer.round + 1}`
         : timer.phase === 'round'
           ? `Runde ${timer.round + 1} von ${total}`
           : 'Alle Runden gespielt';
@@ -76,12 +76,12 @@ export function Game({ t, cfg, now, setTimer, openResult, onFinish }: Props) {
               </button>
             </div>
             {notStarted && timer.phase === 'warmup' && timer.round === 0 && (
-              <p className="muted small center">Start drückt den Einspiel-Countdown. Danach laufen Runden und Wechsel automatisch.</p>
+              <p className="muted small center">Tippe auf Start, um das Einspielen zu beginnen. Danach laufen Runden und Wechsel automatisch.</p>
             )}
           </>
         ) : (
           <div className="done-box">
-            <p>{missing.length ? `Es fehlen noch ${missing.length} Ergebnis(se).` : 'Alle Ergebnisse sind eingetragen.'}</p>
+            <p>{missing.length ? missing.length === 1 ? 'Es fehlt noch 1 Ergebnis.' : `Es fehlen noch ${missing.length} Ergebnisse.` : 'Alle Ergebnisse sind eingetragen.'}</p>
             <button className="btn btn-primary btn-xl" onClick={onFinish}>
               🏆 Endstand anzeigen
             </button>
@@ -91,7 +91,7 @@ export function Game({ t, cfg, now, setTimer, openResult, onFinish }: Props) {
 
       {missing.length > 0 && (
         <section className="card missing">
-          <h2>Ergebnis fehlt</h2>
+          <h2>Fehlende Ergebnisse</h2>
           <div className="missing-list">
             {missing.map(({ round, court }) => (
               <button key={`${round}-${court}`} className="btn btn-accent" onClick={() => openResult(round, court)}>

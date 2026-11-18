@@ -127,8 +127,8 @@ export function Setup({ draft, onChange, onStart }: Props) {
 
         <details className="advanced">
           <summary>Weitere Einstellungen</summary>
-          <Stepper label="Einspielzeit" unit="Min" value={settings.warmupMinutes} min={0} max={20} onChange={(v) => set({ warmupMinutes: v })} />
-          <Stepper label="Wechselzeit" unit="Min" value={settings.changeMinutes} min={0} max={10} onChange={(v) => set({ changeMinutes: v })} />
+          <Stepper label="Einspielzeit" unit="Min." value={settings.warmupMinutes} min={0} max={20} onChange={(v) => set({ warmupMinutes: v })} />
+          <Stepper label="Wechselzeit" unit="Min." value={settings.changeMinutes} min={0} max={10} onChange={(v) => set({ changeMinutes: v })} />
           <Stepper label="Punktsumme pro Match" unit="Pkt" value={settings.pointSum} min={4} max={64} onChange={(v) => set({ pointSum: v })} />
         </details>
       </section>
@@ -143,17 +143,17 @@ export function Setup({ draft, onChange, onStart }: Props) {
           </div>
           <div className="facts">
             <Fact big={`${preview.plan.rounds}`} small="Runden" />
-            <Fact big={fmtMin(preview.plan.roundMinutes)} small="Min pro Runde" />
+            <Fact big={fmtMin(preview.plan.roundMinutes)} small="Min. pro Runde" />
             <Fact
               big={preview.plan.fair ? `${preview.plan.minMatches}` : `${preview.plan.minMatches}–${preview.plan.maxMatches}`}
-              small="Matches je Spieler"
+              small="Matches pro Spieler"
             />
             <Fact big={`${preview.plan.activeCourts}`} small={preview.plan.activeCourts === 1 ? 'Platz aktiv' : 'Plätze aktiv'} />
           </div>
           <p className="muted small">
-            {settings.warmupMinutes > 0 && `${fmtMin(settings.warmupMinutes)} Min Einspielen · `}
-            {preview.plan.rounds > 1 && `${fmtMin(settings.changeMinutes)} Min Wechsel · `}
-            {preview.plan.bufferMinutes > 0 ? `${fmtMin(preview.plan.bufferMinutes)} Min Puffer` : 'kein Puffer'}
+            {settings.warmupMinutes > 0 && `${fmtMin(settings.warmupMinutes)} Min. Einspielen · `}
+            {preview.plan.rounds > 1 && `${fmtMin(settings.changeMinutes)} Min. Wechsel · `}
+            {preview.plan.bufferMinutes > 0 ? `${fmtMin(preview.plan.bufferMinutes)} Min. Puffer` : 'kein Puffer'}
           </p>
 
           {!preview.plan.fair && <UnfairHint stats={preview.stats.matches} name={name} />}
@@ -255,7 +255,7 @@ function DurationStepper({ value, onChange }: { value: number; onChange: (v: num
         −
       </button>
       <div className="big-stepper-value" aria-live="polite">
-        <strong>{value} Min</strong>
+        <strong>{value} Min.</strong>
         <span className="muted small">{fmtHours(value)}</span>
       </div>
       <button className="btn btn-icon" aria-label="30 Minuten mehr" disabled={next === undefined} onClick={() => onChange(next)}>
