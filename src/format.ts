@@ -19,3 +19,26 @@ export function joinNames(names: string[]): string {
   if (names.length <= 1) return names.join('');
   return `${names.slice(0, -1).join(', ')} und ${names[names.length - 1]}`;
 }
+
+/** „90 Min“ → „1:30 h“ */
+export function fmtHours(min: number): string {
+  return `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')} h`;
+}
+
+const platz = (n: number) => (n === 1 ? '1 Platz' : `${n} Plätze`);
+
+/**
+ * Hinweis, wenn weniger Plätze genutzt werden als gewählt, z. B.
+ * „6 Spieler: es wird nur 1 Platz genutzt.“ – sonst null.
+ */
+export function courtsNote(players: number, courts: number, used: number): string | null {
+  if (players < 4 || used >= courts) return null;
+  const verb = used === 1 ? 'wird' : 'werden';
+  return `${players} Spieler: es ${verb} nur ${platz(used)} genutzt (4 Spieler pro Platz).`;
+}
+
+/** „Ab Runde 5 werden 3 Plätze genutzt statt 2.“ – nur wenn sich die Platzzahl ändert. */
+export function courtsChange(before: number, after: number, fromRound: number): string | null {
+  if (before === after) return null;
+  return `Ab Runde ${fromRound + 1} ${after === 1 ? 'wird' : 'werden'} ${platz(after)} genutzt statt ${before}.`;
+}

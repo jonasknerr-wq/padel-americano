@@ -6,8 +6,10 @@
  * Team B = 4c+2/4c+3), der Rest setzt aus.
  *
  * Optimierung: Simulated Annealing (Tausch zweier Positionen innerhalb einer
- * Runde) mit gewichteter Kostenfunktion und mehreren Neustarts. Alles läuft
- * über einen Seed-basierten PRNG → bei gleichem Seed identischer Plan.
+ * Runde) mit gewichteter Kostenfunktion und mehreren Neustarts. Die Kosten
+ * werden inkrementell gepflegt: ein Zug rechnet nur die betroffenen Plätze
+ * und Aussetzer neu (konstanter Aufwand statt kompletter Neuberechnung).
+ * Alles läuft über einen Seed-basierten PRNG → bei gleichem Seed identischer Plan.
  *
  * Kostenfunktion (Gewichte so gewählt, dass die Prioritäten praktisch
  * lexikographisch greifen):
@@ -17,9 +19,10 @@
  *   4. Σ Partnerzählungen²     (Partner-Wiederholungen)
  *   5. Σ Gegnerzählungen²      (Gegner-Wiederholungen)
  *
- * Für 8 Spieler auf 2 Plätzen gibt es zusätzlich eine direkte Konstruktion
- * (Kreismethode / 1-Faktorisierung von K8): in den ersten 7 Runden spielt
- * garantiert jeder genau einmal mit jedem zusammen.
+ * Wenn niemand aussetzt und die Spielerzahl 8 oder 12 ist (2 bzw. 3 Plätze),
+ * gibt es zusätzlich eine direkte Konstruktion (Kreismethode /
+ * 1-Faktorisierung): in den ersten N−1 Runden spielt garantiert jeder genau
+ * einmal mit jedem zusammen.
  */
 import { createRng, randInt, shuffle } from './rng';
 import { activeCourts } from './rounds';
@@ -37,8 +40,8 @@ export const DEFAULT_WEIGHTS: Weights = {
   sit: 1e8,
   total: 1e6,
   // Ein Doppel-Aussetzer „kostet“ etwa 1,5 Partner-Wiederholungen. Damit wird er
-  // überall vermieden – außer bei 8 Spielern auf 1 Platz, wo strikte Vermeidung
-  // zwei feste 4er-Gruppen erzwingen würde, die nie miteinander spielen.
+  // vermieden, wo es geht – außer z. B. bei 8 Spielern auf 1 Platz, wo strikte
+  // Vermeidung zwei feste 4er-Gruppen erzwingen würde, die nie miteinander spielen.
   consecutive: 300,
   partner: 100,
   opponent: 1,
@@ -79,17 +82,20 @@ export function generateSchedule(opts: ScheduleOptions): Round[] {
 
   const ctx = buildContext(opts, a);
   const rng = createRng(opts.seed);
-  const restarts = opts.restarts ?? 8;
-  const iterations = opts.iterations ?? Math.max(4000, 1500 * rounds);
+  // Mit Aussetzern ist die Suche schwieriger (Aussetzer-Reihenfolge + Partner) → mehr Schritte.
+  const iterations = opts.iterations ?? (4 * a < n ? Math.max(15000, 3000 * rounds) : Math.max(15000, 2500 * rounds));
+  let restarts = opts.restarts ?? 4;
 
   let best: Int32Array[] | null = null;
   let bestCost = Infinity;
 
-  // Garantierte Konstruktion für 8 Spieler auf 2 Plätzen (nur ohne Historie)
-  if (n === 8 && a === 2 && !(opts.history && opts.history.length)) {
-    const constructed = constructEight(rounds, ctx, rng);
+  // Garantierte Konstruktion für 8 Spieler / 2 Plätze und 12 Spieler / 3 Plätze (nur ohne Historie).
+  // Sie ist bereits optimal bei den Partnern; die Suche läuft dann nur noch kurz zum Vergleich.
+  if ((n === 8 || n === 12) && 4 * a === n && !(opts.history && opts.history.length)) {
+    const constructed = constructCircle(rounds, ctx, rng);
     best = constructed;
-    bestCost = cost(constructed, ctx);
+    bestCost = new Search(ctx, constructed).cost();
+    restarts = opts.restarts ?? 1;
   }
 
   for (let s = 0; s < restarts; s++) {
@@ -173,60 +179,127 @@ function buildContext(opts: ScheduleOptions, a: number): Ctx {
   };
 }
 
-// Puffer, damit die Kostenfunktion nicht bei jedem Aufruf neu alloziert.
-let bufP = new Int32Array(0);
-let bufO = new Int32Array(0);
+/**
+ * Zustand eines Plans mit inkrementell gepflegten Kostenanteilen.
+ * `swap` tauscht zwei Positionen einer Runde und aktualisiert nur, was sich
+ * dadurch ändert. Ein zweiter gleicher `swap` macht den Zug rückgängig.
+ */
+class Search {
+  readonly perm: Int32Array[];
+  private readonly n: number;
+  private readonly play: number;
+  private readonly rounds: number;
+  private readonly w: Weights;
+  private readonly lastSat: Uint8Array;
+  private readonly sitAt: Uint8Array; // rounds*n
+  private readonly partner: Int32Array;
+  private readonly opp: Int32Array;
+  private readonly sit: Int32Array;
+  private readonly matches: Int32Array;
+  private sSit = 0;
+  private sTot = 0;
+  private sP = 0;
+  private sO = 0;
+  private consec = 0;
 
-function cost(state: Int32Array[], ctx: Ctx): number {
-  const { n, play, w } = ctx;
-  if (bufP.length !== n * n) {
-    bufP = new Int32Array(n * n);
-    bufO = new Int32Array(n * n);
-  }
-  const partner = bufP;
-  const opp = bufO;
-  partner.set(ctx.partnerHist);
-  opp.set(ctx.oppHist);
-  const sit = new Int32Array(n);
-  const matches = Int32Array.from(ctx.pastMatches);
-  let prev = ctx.lastSat;
-  let consec = 0;
-
-  for (const perm of state) {
-    const cur = new Uint8Array(n);
-    for (let k = play; k < n; k++) {
-      const p = perm[k];
-      sit[p]++;
-      cur[p] = 1;
-      if (prev[p]) consec++;
+  constructor(ctx: Ctx, state: Int32Array[]) {
+    const { n } = ctx;
+    this.n = n;
+    this.play = ctx.play;
+    this.rounds = state.length;
+    this.w = ctx.w;
+    this.lastSat = ctx.lastSat;
+    this.perm = state;
+    this.sitAt = new Uint8Array(state.length * n);
+    this.partner = Int32Array.from(ctx.partnerHist);
+    this.opp = Int32Array.from(ctx.oppHist);
+    this.sit = new Int32Array(n);
+    this.matches = Int32Array.from(ctx.pastMatches);
+    for (let i = 0; i < n; i++) {
+      this.sTot += this.matches[i] * this.matches[i];
+      for (let j = i + 1; j < n; j++) {
+        this.sP += this.partner[i * n + j] ** 2;
+        this.sO += this.opp[i * n + j] ** 2;
+      }
     }
-    for (let k = 0; k < play; k += 4) {
-      const p0 = perm[k], p1 = perm[k + 1], p2 = perm[k + 2], p3 = perm[k + 3];
-      partner[p0 * n + p1]++;
-      partner[p1 * n + p0]++;
-      partner[p2 * n + p3]++;
-      partner[p3 * n + p2]++;
-      opp[p0 * n + p2]++; opp[p2 * n + p0]++;
-      opp[p0 * n + p3]++; opp[p3 * n + p0]++;
-      opp[p1 * n + p2]++; opp[p2 * n + p1]++;
-      opp[p1 * n + p3]++; opp[p3 * n + p1]++;
-      matches[p0]++; matches[p1]++; matches[p2]++; matches[p3]++;
-    }
-    prev = cur;
-  }
-
-  let sSit = 0, sTot = 0, sP = 0, sO = 0;
-  for (let i = 0; i < n; i++) {
-    sSit += sit[i] * sit[i];
-    sTot += matches[i] * matches[i];
-    for (let j = i + 1; j < n; j++) {
-      const pc = partner[i * n + j];
-      const oc = opp[i * n + j];
-      sP += pc * pc;
-      sO += oc * oc;
+    for (let r = 0; r < state.length; r++) {
+      for (let k = 0; k < this.play; k += 4) this.court(r, k, 1);
+      for (let k = this.play; k < n; k++) this.setSit(r, state[r][k], 1);
     }
   }
-  return w.sit * sSit + w.total * sTot + w.consecutive * consec + w.partner * sP + w.opponent * sO;
+
+  cost(): number {
+    const w = this.w;
+    return w.sit * this.sSit + w.total * this.sTot + w.consecutive * this.consec + w.partner * this.sP + w.opponent * this.sO;
+  }
+
+  swap(r: number, i: number, j: number): void {
+    const play = this.play;
+    const perm = this.perm[r];
+    const ci = i < play ? i & ~3 : -1;
+    const cj = j < play ? j & ~3 : -1;
+    if (ci >= 0) this.court(r, ci, -1);
+    if (cj >= 0 && cj !== ci) this.court(r, cj, -1);
+    const x = perm[i];
+    const y = perm[j];
+    perm[i] = y;
+    perm[j] = x;
+    if (ci >= 0) this.court(r, ci, 1);
+    if (cj >= 0 && cj !== ci) this.court(r, cj, 1);
+    if (i < play !== j < play) {
+      this.setSit(r, x, j >= play ? 1 : 0);
+      this.setSit(r, y, i >= play ? 1 : 0);
+    }
+  }
+
+  /** Runde r komplett ersetzen (nur für Pläne ohne Aussetzer: Plätze werden neu gezählt). */
+  replaceRound(r: number, next: Int32Array): void {
+    for (let k = 0; k < this.play; k += 4) this.court(r, k, -1);
+    this.perm[r] = next;
+    for (let k = 0; k < this.play; k += 4) this.court(r, k, 1);
+  }
+
+  /** Beiträge des Platzes ab Position k in Runde r hinzufügen (d=1) oder entfernen (d=−1). */
+  private court(r: number, k: number, d: number): void {
+    const perm = this.perm[r];
+    const p0 = perm[k], p1 = perm[k + 1], p2 = perm[k + 2], p3 = perm[k + 3];
+    this.pair(this.partner, p0, p1, d, true);
+    this.pair(this.partner, p2, p3, d, true);
+    this.pair(this.opp, p0, p2, d, false);
+    this.pair(this.opp, p0, p3, d, false);
+    this.pair(this.opp, p1, p2, d, false);
+    this.pair(this.opp, p1, p3, d, false);
+    const m = this.matches;
+    this.sTot += d * (2 * m[p0] + d) + d * (2 * m[p1] + d) + d * (2 * m[p2] + d) + d * (2 * m[p3] + d);
+    m[p0] += d;
+    m[p1] += d;
+    m[p2] += d;
+    m[p3] += d;
+  }
+
+  private pair(arr: Int32Array, a: number, b: number, d: number, isPartner: boolean): void {
+    const k = a * this.n + b;
+    const c = arr[k];
+    const delta = d * (2 * c + d); // (c+d)² − c²
+    if (isPartner) this.sP += delta;
+    else this.sO += delta;
+    arr[k] = c + d;
+    arr[b * this.n + a] = c + d;
+  }
+
+  private setSit(r: number, p: number, v: number): void {
+    const n = this.n;
+    const old = this.sitAt[r * n + p];
+    if (old === v) return;
+    const d = v - old;
+    const before = r === 0 ? this.lastSat[p] : this.sitAt[(r - 1) * n + p];
+    const after = r + 1 < this.rounds ? this.sitAt[(r + 1) * n + p] : 0;
+    this.consec += d * (before + after);
+    const s = this.sit[p];
+    this.sSit += d * (2 * s + d);
+    this.sit[p] = s + d;
+    this.sitAt[r * n + p] = v;
+  }
 }
 
 function initialState(ctx: Ctx, rng: () => number): Int32Array[] {
@@ -245,15 +318,18 @@ function initialState(ctx: Ctx, rng: () => number): Int32Array[] {
 
 function anneal(ctx: Ctx, rng: () => number, iterations: number) {
   const { n, play, rounds } = ctx;
-  const state = initialState(ctx, rng);
-  let c = cost(state, ctx);
+  const search = new Search(ctx, initialState(ctx, rng));
+  const state = search.perm;
+  let c = search.cost();
   let best = state.map((p) => p.slice());
   let bestCost = c;
   const t0 = 400;
   const t1 = 0.2;
   const hasSitters = play < n;
+  const ratio = Math.log(t1 / t0) / iterations;
+  // Zwischenspeicher für bis zu zwei Tauschzüge: [runde, i, j] × 2
+  const mv = new Int32Array(6);
   for (let it = 0; it < iterations; it++) {
-    const temp = t0 * Math.pow(t1 / t0, it / iterations);
     const r = randInt(rng, rounds);
     const i = randInt(rng, n);
     const j = randInt(rng, n);
@@ -265,8 +341,11 @@ function anneal(ctx: Ctx, rng: () => number, iterations: number) {
     // Zug 2 (Doppeltausch): tauscht Spieler X (spielt) und Y (setzt aus) in Runde r
     // UND in einer zweiten Runde mit umgekehrter Rolle. Die Aussetzer-Zahlen
     // bleiben so ausgeglichen – nötig, um aus „festen Gruppen“ herauszukommen.
-    const swaps: [number, number, number][] = [[r, i, j]];
-    if (hasSitters && rounds > 1 && (i < play) !== (j < play) && rng() < 0.5) {
+    let moves = 1;
+    mv[0] = r;
+    mv[1] = i;
+    mv[2] = j;
+    if (hasSitters && rounds > 1 && i < play !== j < play && rng() < 0.5) {
       const perm = state[r];
       const x = perm[i < play ? i : j]; // spielt in r
       const y = perm[i < play ? j : i]; // setzt aus in r
@@ -275,47 +354,54 @@ function anneal(ctx: Ctx, rng: () => number, iterations: number) {
         const p2 = state[r2];
         const ix = p2.indexOf(x);
         const iy = p2.indexOf(y);
-        if (ix >= play && iy < play) swaps.push([r2, ix, iy]);
+        if (ix >= play && iy < play) {
+          mv[3] = r2;
+          mv[4] = ix;
+          mv[5] = iy;
+          moves = 2;
+        }
       }
     }
-    for (const [rr, a, b] of swaps) {
-      const p = state[rr];
-      [p[a], p[b]] = [p[b], p[a]];
-    }
-    const nc = cost(state, ctx);
+    for (let k = 0; k < moves; k++) search.swap(mv[3 * k], mv[3 * k + 1], mv[3 * k + 2]);
+    const nc = search.cost();
     const d = nc - c;
-    if (d <= 0 || rng() < Math.exp(-d / temp)) {
+    if (d <= 0 || rng() < Math.exp(-d / (t0 * Math.exp(ratio * it)))) {
       c = nc;
       if (c < bestCost) {
         bestCost = c;
         best = state.map((p) => p.slice());
       }
     } else {
-      for (let k = swaps.length - 1; k >= 0; k--) {
-        const [rr, a, b] = swaps[k];
-        const p = state[rr];
-        [p[a], p[b]] = [p[b], p[a]];
-      }
+      for (let k = moves - 1; k >= 0; k--) search.swap(mv[3 * k], mv[3 * k + 1], mv[3 * k + 2]);
     }
   }
   return { state: best, c: bestCost };
 }
 
 /**
- * 8 Spieler / 2 Plätze: Kreismethode. Spieler 7 bleibt fix, 0..6 rotieren.
- * Runde k: Paare (7,k) und ((k+i) mod 7, (k−i) mod 7) für i = 1..3.
- * Das ist eine 1-Faktorisierung von K8 → nach 7 Runden hatte jeder jeden
- * genau einmal als Partner. Die Aufteilung der 4 Paare auf 2 Plätze
- * (3 Möglichkeiten je Runde) wird so gewählt, dass Gegner möglichst gut
- * rotieren (erschöpfend bis 8 Runden, sonst Runde für Runde).
+ * 8 Spieler / 2 Plätze bzw. 12 Spieler / 3 Plätze: Kreismethode über Z_m (m = N−1).
+ * Spieler ∞ = m bleibt fix, 0..m−1 rotieren. Runde k: Paar (∞, k) plus die
+ * um k verschobenen Paare eines „Starters“. Jeder Starter ergibt eine
+ * 1-Faktorisierung von K_N → nach N−1 Runden hatte jeder jeden genau einmal
+ * als Partner. Welche Paare gegeneinander spielen (3 bzw. 15 Möglichkeiten
+ * je Runde), wird so gewählt, dass auch die Gegner möglichst gut rotieren.
  */
-function constructEight(rounds: number, ctx: Ctx, rng: () => number): Int32Array[] {
-  const label = shuffle([...Array(8).keys()], rng);
+function constructCircle(rounds: number, ctx: Ctx, rng: () => number): Int32Array[] {
+  const n = ctx.n;
+  const m = n - 1;
+  const label = shuffle([...Array(n).keys()], rng);
+  const splits = pairGroupings(n / 2);
   let best: Int32Array[] = [];
   let bestCost = Infinity;
-  for (const starter of startersZ7()) {
-    const cand = splitFactors(starter, rounds, ctx, label);
-    const c = cost(cand, ctx);
+  for (const starter of starters(m)) {
+    const factors: number[][] = [];
+    for (let r = 0; r < rounds; r++) {
+      const k = r % m;
+      const pairs = [[m, k], ...starter.map(([x, y]) => [(x + k) % m, (y + k) % m])];
+      factors.push(pairs.flatMap(([x, y]) => [label[x], label[y]]));
+    }
+    const cand = optimizeSplits(factors, splits, ctx, rounds <= 8 && splits.length === 3);
+    const c = new Search(ctx, cand).cost();
     if (c < bestCost) {
       bestCost = c;
       best = cand;
@@ -325,80 +411,106 @@ function constructEight(rounds: number, ctx: Ctx, rng: () => number): Int32Array
 }
 
 /**
- * Alle „Starter“ von Z7: Zerlegungen von {1..6} in 3 Paare, deren Differenzen
- * (±1, ±2, ±3) je genau einmal vorkommen. Zusammen mit dem Paar (∞, 0) und
- * zyklischem Verschieben ergibt jeder Starter eine 1-Faktorisierung von K8.
+ * Alle „Starter“ von Z_m: Zerlegungen von {1..m−1} in Paare, deren
+ * Differenzen (±1 … ±(m−1)/2) je genau einmal vorkommen.
  */
-function startersZ7(): [number, number][][] {
+function starters(m: number): [number, number][][] {
+  const half = (m - 1) / 2;
+  const target = Array.from({ length: half }, (_, i) => i + 1).join();
   const out: [number, number][][] = [];
-  const rec = (rest: number[], acc: [number, number][]) => {
+  const rec = (rest: number[], acc: [number, number][], used: Set<number>) => {
     if (rest.length === 0) {
-      const diffs = acc.map(([x, y]) => Math.min((y - x + 7) % 7, (x - y + 7) % 7)).sort();
-      if (diffs.join() === '1,2,3') out.push(acc);
+      const diffs = acc.map(([x, y]) => Math.min((y - x + m) % m, (x - y + m) % m)).sort((p, q) => p - q);
+      if (diffs.join() === target) out.push(acc);
       return;
     }
     const [x, ...others] = rest;
     for (let k = 0; k < others.length; k++) {
-      rec(others.filter((_, i) => i !== k), [...acc, [x, others[k]]]);
+      const d = Math.min((others[k] - x + m) % m, (x - others[k] + m) % m);
+      if (used.has(d)) continue; // Differenz schon vergeben → abschneiden
+      used.add(d);
+      rec(others.filter((_, i) => i !== k), [...acc, [x, others[k]]], used);
+      used.delete(d);
     }
   };
-  rec([1, 2, 3, 4, 5, 6], []);
+  rec(Array.from({ length: m - 1 }, (_, i) => i + 1), [], new Set());
   return out;
 }
 
-function splitFactors(starter: [number, number][], rounds: number, ctx: Ctx, label: number[]): Int32Array[] {
-  const factors: [number, number][][] = [];
-  for (let r = 0; r < rounds; r++) {
-    const k = r % 7;
-    const pairs: [number, number][] = [[7, k], ...starter.map(([x, y]) => [(x + k) % 7, (y + k) % 7] as [number, number])];
-    factors.push(pairs.map(([x, y]) => [label[x], label[y]]));
-  }
-  const splits = [
-    [0, 1, 2, 3],
-    [0, 2, 1, 3],
-    [0, 3, 1, 2],
-  ];
-  const build = (choice: number[]) =>
-    factors.map((pairs, r) => {
-      const sp = splits[choice[r]];
-      const out: number[] = [];
-      for (const pi of sp) out.push(...pairs[pi]);
-      return Int32Array.from(out);
-    });
+/** Alle Aufteilungen von k Paaren (k gerade) in Plätze à 2 Paare, als Reihenfolge der Paar-Indizes. */
+function pairGroupings(k: number): number[][] {
+  const out: number[][] = [];
+  const rec = (rest: number[], acc: number[]) => {
+    if (rest.length === 0) return void out.push(acc);
+    const [x, ...others] = rest;
+    for (let i = 0; i < others.length; i++) rec(others.filter((_, j) => j !== i), [...acc, x, others[i]]);
+  };
+  rec([...Array(k).keys()], []);
+  return out;
+}
 
+/**
+ * Wählt je Runde die Aufteilung der Paare auf die Plätze.
+ * Klein (8 Spieler, ≤ 8 Runden): alle Kombinationen durchprobieren.
+ * Sonst: koordinatenweise verbessern (je Runde die beste Aufteilung), bis nichts mehr besser wird.
+ */
+function optimizeSplits(factors: number[][], splits: number[][], ctx: Ctx, exhaustive: boolean): Int32Array[] {
+  const rounds = factors.length;
+  const buildRound = (r: number, s: number) => {
+    const out = new Int32Array(ctx.n);
+    let o = 0;
+    for (const pi of splits[s]) {
+      out[o++] = factors[r][2 * pi];
+      out[o++] = factors[r][2 * pi + 1];
+    }
+    return out;
+  };
   const choice = new Array(rounds).fill(0);
-  if (rounds <= 8) {
+  const evalChoice = () => new Search(ctx, choice.map((s, r) => buildRound(r, s))).cost();
+
+  if (exhaustive) {
     let bestChoice = choice.slice();
     let bestCost = Infinity;
-    const total = 3 ** rounds;
+    const total = splits.length ** rounds;
     for (let code = 0; code < total; code++) {
       let x = code;
       for (let r = 0; r < rounds; r++) {
-        choice[r] = x % 3;
-        x = Math.floor(x / 3);
+        choice[r] = x % splits.length;
+        x = Math.floor(x / splits.length);
       }
-      const c = cost(build(choice), ctx);
+      const c = evalChoice();
       if (c < bestCost) {
         bestCost = c;
         bestChoice = choice.slice();
       }
     }
-    return build(bestChoice);
+    return bestChoice.map((s, r) => buildRound(r, s));
   }
-  for (let r = 0; r < rounds; r++) {
-    let bestS = 0;
-    let bestCost = Infinity;
-    for (let s = 0; s < 3; s++) {
-      choice[r] = s;
-      const c = cost(build(choice).slice(0, r + 1), { ...ctx, rounds: r + 1 });
-      if (c < bestCost) {
-        bestCost = c;
-        bestS = s;
+
+  // Inkrementell: je Runde alle Aufteilungen probieren, die beste behalten.
+  const options = factors.map((_, r) => splits.map((_, s) => buildRound(r, s)));
+  const search = new Search(ctx, choice.map((s, r) => options[r][s]));
+  let current = search.cost();
+  for (let pass = 0; pass < 6; pass++) {
+    let improved = false;
+    for (let r = 0; r < rounds; r++) {
+      let bestS = choice[r];
+      for (let s = 0; s < splits.length; s++) {
+        if (s === bestS) continue;
+        search.replaceRound(r, options[r][s]);
+        const c = search.cost();
+        if (c < current) {
+          current = c;
+          bestS = s;
+          improved = true;
+        }
       }
+      search.replaceRound(r, options[r][bestS]);
+      choice[r] = bestS;
     }
-    choice[r] = bestS;
+    if (!improved) break;
   }
-  return build(choice);
+  return choice.map((s, r) => buildRound(r, s));
 }
 
 function toRounds(state: Int32Array[], players: PlayerId[], ctx: Ctx): Round[] {

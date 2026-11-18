@@ -94,6 +94,16 @@ describe('Turnier', () => {
     expect(() => addPlayer(t, 'neu')).toThrow();
   });
 
+  it('Nachzügler bis 12 Spieler, der 13. wird abgelehnt; mit 3 Plätzen wird der 3. Platz genutzt', () => {
+    const settings = { ...DEFAULT_SETTINGS, courts: 3, totalMinutes: 240 };
+    let t = createTournament(players(11), settings, 1);
+    expect(t.rounds[0].matches).toHaveLength(2); // 11 Spieler → nur 2 Plätze
+    t = addPlayer(t, 'Zwölf');
+    expect(t.activeIds).toHaveLength(12);
+    for (const r of t.rounds) expect(r.matches).toHaveLength(3);
+    expect(() => addPlayer(t, 'Dreizehn')).toThrow(/12/);
+  });
+
   it('Turnier vorzeitig beenden schneidet leere Runden ab', () => {
     let t = createTournament(players(8), DEFAULT_SETTINGS, 1);
     t = setResult(t, 0, 0, 3, 2);
@@ -107,5 +117,8 @@ describe('Turnier', () => {
     expect(validateNames(['A', 'B', 'C', 'a'])).toMatch(/einmal/);
     expect(validateNames(['A', 'B', 'C', ' '])).toMatch(/Leere/);
     expect(validateNames(['A', 'B', 'C', 'D'])).toBeNull();
+    const twelve = Array.from({ length: 12 }, (_, i) => `S${i}`);
+    expect(validateNames(twelve)).toBeNull();
+    expect(validateNames([...twelve, 'X'])).toMatch(/Höchstens 12/);
   });
 });

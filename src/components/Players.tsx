@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { courtsChange, courtsNote } from '../format';
+import { activeCourts, MAX_PLAYERS } from '../logic/rounds';
 import { scheduleStats } from '../logic/schedule';
 import { replanFrom, type Tournament } from '../logic/tournament';
 import type { Theme } from '../store';
@@ -28,6 +30,10 @@ export function Players({ t, theme, setTheme, onDrop, onDropAndFinish, onAdd, on
     t.players.map((p) => p.id),
   ).matches;
   const planned = scheduleStats(t.rounds, t.players.map((p) => p.id)).matches;
+  const courts = t.settings.courts;
+  const usedNow = activeCourts(active.length, courts);
+  const usedNote = courtsNote(active.length, courts, usedNow);
+  const changeNote = (count: number) => courtsChange(usedNow, activeCourts(count, courts), from);
 
   const drop = async (id: string, name: string) => {
     if (active.length <= 4) {
@@ -46,6 +52,7 @@ export function Players({ t, theme, setTheme, onDrop, onDropAndFinish, onAdd, on
         <p>
           {canReplan ? `Der Restplan ab Runde ${from + 1} wird für die übrigen ${active.length - 1} Spieler neu berechnet.` : 'Es gibt keine weiteren Runden mehr.'}{' '}
           Bisherige Ergebnisse bleiben, {name} bleibt mit Ø-Wertung in der Tabelle.
+          {canReplan && changeNote(active.length - 1) && <strong> {changeNote(active.length - 1)}</strong>}
         </p>
       ),
       confirm: 'Fällt aus',
@@ -59,7 +66,12 @@ export function Players({ t, theme, setTheme, onDrop, onDropAndFinish, onAdd, on
     if (!n) return setError('Bitte einen Namen eingeben.');
     const ok = await ask({
       title: `${n} kommt dazu?`,
-      text: <p>Der Restplan ab Runde {from + 1} wird neu berechnet.</p>,
+      text: (
+        <p>
+          Der Restplan ab Runde {from + 1} wird neu berechnet.
+          {changeNote(active.length + 1) && <strong> {changeNote(active.length + 1)}</strong>}
+        </p>
+      ),
       confirm: 'Hinzufügen',
     });
     if (!ok) return;
@@ -72,6 +84,7 @@ export function Players({ t, theme, setTheme, onDrop, onDropAndFinish, onAdd, on
     <div className="players">
       <section className="card">
         <h2>Dabei ({active.length})</h2>
+        {usedNote && <p className="court-note">{usedNote}</p>}
         <ul className="player-list">
           {active.map((p) => (
             <li key={p.id}>
@@ -99,7 +112,7 @@ export function Players({ t, theme, setTheme, onDrop, onDropAndFinish, onAdd, on
                   <span className="grow muted">
                     {p.name} · {planned[p.id] ?? 0} Matches
                   </span>
-                  {canReplan && active.length < 8 && (
+                  {canReplan && active.length < MAX_PLAYERS && (
                     <button className="btn btn-small" onClick={() => add(p.name)}>
                       Wieder dabei
                     </button>
@@ -109,7 +122,7 @@ export function Players({ t, theme, setTheme, onDrop, onDropAndFinish, onAdd, on
             </ul>
           </>
         )}
-        {canReplan && active.length < 8 && (
+        {canReplan && active.length < MAX_PLAYERS && (
           <form
             className="add-row mt"
             onSubmit={(e) => {
@@ -124,7 +137,11 @@ export function Players({ t, theme, setTheme, onDrop, onDropAndFinish, onAdd, on
           </form>
         )}
         {error && <p className="error">{error}</p>}
-        {canReplan && <p className="muted small">Änderungen gelten ab Runde {from + 1}. Bereits gespielte Runden bleiben unverändert.</p>}
+        {canReplan && (
+          <p className="muted small">
+            Änderungen gelten ab Runde {from + 1}. Bereits gespielte Runden bleiben unverändert. Maximal {MAX_PLAYERS} Spieler.
+          </p>
+        )}
       </section>
 
       <section className="card">

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ConfirmProvider, useConfirm } from './components/Dialog';
 import { Final } from './components/Final';
 import { Game } from './components/Game';
+import { Layout } from './components/Layout';
 import { Matches } from './components/Matches';
 import { Players } from './components/Players';
 import { ResultSheet } from './components/ResultSheet';
@@ -45,8 +46,6 @@ export default function App() {
 function Shell({ state, update }: { state: AppState; update: (fn: (s: AppState) => AppState) => void }) {
   const ask = useConfirm();
   const t = state.tournament;
-  const screen = !t ? 'setup' : t.finished ? 'final' : 'running';
-  useEffect(() => window.scrollTo(0, 0), [screen]);
 
   const newTournament = async () => {
     const ok = await ask({
@@ -106,7 +105,6 @@ function Running({
   const cfg = useMemo(() => timerConfig(t), [t.settings, t.plan, t.rounds.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useWakeLock(t.timer.running);
-  useEffect(() => window.scrollTo(0, 0), [tab]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 250);
@@ -139,22 +137,48 @@ function Running({
         ? 'Einspielen'
         : `Runde ${t.timer.round + 1}/${t.rounds.length}`;
 
-  return (
-    <div className="page running">
-      <header className="app-header">
-        <h1>{headerTitle}</h1>
-        <button
-          className="btn btn-small undo-btn"
-          disabled={!lastUndo}
-          title={lastUndo ? `Rückgängig: ${lastUndo.label}` : 'Nichts rückgängig zu machen'}
-          onClick={() => setT(undo)}
-        >
-          ↶ Rückgängig
+  const tabbar = (
+    <nav className="tabbar">
+      {(
+        [
+          ['game', 'Spiel', '⏱'],
+          ['table', 'Tabelle', '🏆'],
+          ['matches', 'Matches', '📋'],
+          ['players', 'Spieler', '👥'],
+        ] as [Tab, string, string][]
+      ).map(([id, label, icon]) => (
+        <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)} aria-current={tab === id ? 'page' : undefined}>
+          <span className="tab-icon" aria-hidden>
+            {icon}
+          </span>
+          {label}
         </button>
-      </header>
-      {lastUndo && <div className="undo-hint">Zuletzt: {lastUndo.label}</div>}
+      ))}
+    </nav>
+  );
 
-      <main className="content">
+  return (
+    <Layout
+      className="running"
+      scrollKey={tab}
+      header={
+        <>
+          <div className="app-header">
+            <h1>{headerTitle}</h1>
+            <button
+              className="btn btn-small undo-btn"
+              disabled={!lastUndo}
+              title={lastUndo ? `Rückgängig: ${lastUndo.label}` : 'Nichts rückgängig zu machen'}
+              onClick={() => setT(undo)}
+            >
+              ↶ Rückgängig
+            </button>
+          </div>
+          {lastUndo && <div className="undo-hint">Zuletzt: {lastUndo.label}</div>}
+        </>
+      }
+      footer={tabbar}
+    >
         {tab === 'game' && (
           <Game
             t={t}
@@ -193,25 +217,6 @@ function Running({
             onNew={onNew}
           />
         )}
-      </main>
-
-      <nav className="tabbar">
-        {(
-          [
-            ['game', 'Spiel', '⏱'],
-            ['table', 'Tabelle', '🏆'],
-            ['matches', 'Matches', '📋'],
-            ['players', 'Spieler', '👥'],
-          ] as [Tab, string, string][]
-        ).map(([id, label, icon]) => (
-          <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)} aria-current={tab === id ? 'page' : undefined}>
-            <span className="tab-icon" aria-hidden>
-              {icon}
-            </span>
-            {label}
-          </button>
-        ))}
-      </nav>
 
       {editing && t.rounds[editing.round] && (
         <ResultSheet
@@ -229,6 +234,6 @@ function Running({
           }}
         />
       )}
-    </div>
+    </Layout>
   );
 }

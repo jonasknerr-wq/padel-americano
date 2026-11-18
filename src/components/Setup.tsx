@@ -1,11 +1,12 @@
 import { useMemo, useRef, useState } from 'react';
-import { fmtMin, joinNames } from '../format';
+import { courtsNote, fmtHours, fmtMin, joinNames } from '../format';
 import { newSeed } from '../logic/rng';
-import { MAX_ROUND_MINUTES, MIN_ROUND_MINUTES } from '../logic/rounds';
+import { activeCourts, COURT_OPTIONS, DURATION_OPTIONS, MAX_PLAYERS, MAX_ROUND_MINUTES, MIN_ROUND_MINUTES } from '../logic/rounds';
 import { scheduleStats } from '../logic/schedule';
 import { buildSchedule, createTournament, validateNames, type Settings, type Tournament } from '../logic/tournament';
 import type { Player } from '../logic/types';
 import type { SetupDraft } from '../store';
+import { Layout } from './Layout';
 
 interface Props {
   draft: SetupDraft;
@@ -27,7 +28,7 @@ export function Setup({ draft, onChange, onStart }: Props) {
     const n = input.trim();
     if (!n) return setInputError('Bitte einen Namen eingeben.');
     if (names.some((x) => x.toLowerCase() === n.toLowerCase())) return setInputError(`„${n}“ ist schon dabei.`);
-    if (names.length >= 8) return setInputError('Höchstens 8 Spieler.');
+    if (names.length >= MAX_PLAYERS) return setInputError(`Höchstens ${MAX_PLAYERS} Spieler.`);
     onChange({ ...draft, names: [...names, n] });
     setInput('');
     setInputError(null);
@@ -50,15 +51,32 @@ export function Setup({ draft, onChange, onStart }: Props) {
     preview && preview.plan.roundMinutes < 1 ? 'Die Gesamtdauer reicht mit diesen Einstellungen nicht für eine Runde.' : null;
 
   const name = (id: string) => players.find((p) => p.id === id)?.name ?? '?';
+  const usedNote = courtsNote(names.length, settings.courts, activeCourts(names.length, settings.courts));
 
   return (
-    <div className="page setup">
-      <header className="app-header">
-        <h1>Padel Americano</h1>
-      </header>
-
+    <Layout
+      className="setup"
+      header={
+        <div className="app-header">
+          <h1>Padel Americano</h1>
+        </div>
+      }
+      footer={
+        <div className="footer-actions">
+          <button
+            className="btn btn-primary btn-xl"
+            disabled={!preview || !!settingsError}
+            onClick={() => onStart(createTournament(players, settings, seed))}
+          >
+            {preview ? 'Turnier starten' : nameError ?? 'Turnier starten'}
+          </button>
+        </div>
+      }
+    >
       <section className="card">
-        <h2>Spieler ({names.length}/8)</h2>
+        <h2>
+          Spieler ({names.length}/{MAX_PLAYERS})
+        </h2>
         <ul className="name-list">
           {names.map((n, i) => (
             <li key={n + i}>
@@ -70,7 +88,7 @@ export function Setup({ draft, onChange, onStart }: Props) {
             </li>
           ))}
         </ul>
-        {names.length < 8 && (
+        {names.length < MAX_PLAYERS && (
           <form
             className="add-row"
             onSubmit={(e) => {
@@ -101,10 +119,11 @@ export function Setup({ draft, onChange, onStart }: Props) {
       </section>
 
       <section className="card">
-        <h2>Gesamtdauer</h2>
-        <Segmented value={settings.totalMinutes} options={[60, 90, 120]} label={(v) => `${v} Min`} onChange={(v) => set({ totalMinutes: v })} />
+        <h2 id="dur-label">Gesamtdauer</h2>
+        <DurationStepper value={settings.totalMinutes} onChange={(v) => set({ totalMinutes: v })} />
         <h2 className="mt">Verfügbare Plätze</h2>
-        <Segmented value={settings.courts} options={[1, 2]} label={(v) => `${v} ${v === 1 ? 'Platz' : 'Plätze'}`} onChange={(v) => set({ courts: v })} />
+        <Segmented value={settings.courts} options={COURT_OPTIONS} label={(v) => `${v} ${v === 1 ? 'Platz' : 'Plätze'}`} onChange={(v) => set({ courts: v })} />
+        {usedNote && <p className="court-note">{usedNote}</p>}
 
         <details className="advanced">
           <summary>Weitere Einstellungen</summary>
@@ -135,7 +154,6 @@ export function Setup({ draft, onChange, onStart }: Props) {
             {settings.warmupMinutes > 0 && `${fmtMin(settings.warmupMinutes)} Min Einspielen · `}
             {preview.plan.rounds > 1 && `${fmtMin(settings.changeMinutes)} Min Wechsel · `}
             {preview.plan.bufferMinutes > 0 ? `${fmtMin(preview.plan.bufferMinutes)} Min Puffer` : 'kein Puffer'}
-            {settings.courts === 2 && preview.plan.activeCourts === 1 && ' · bei unter 8 Spielern wird nur 1 Platz genutzt'}
           </p>
 
           {!preview.plan.fair && <UnfairHint stats={preview.stats.matches} name={name} />}
@@ -195,17 +213,7 @@ export function Setup({ draft, onChange, onStart }: Props) {
           </details>
         </section>
       )}
-
-      <div className="sticky-bottom">
-        <button
-          className="btn btn-primary btn-xl"
-          disabled={!preview || !!settingsError}
-          onClick={() => onStart(createTournament(players, settings, seed))}
-        >
-          {preview ? 'Turnier starten' : nameError ?? 'Turnier starten'}
-        </button>
-      </div>
-    </div>
+    </Layout>
   );
 }
 
@@ -228,6 +236,31 @@ function Fact({ big, small }: { big: string; small: string }) {
     <div className="fact">
       <div className="fact-big">{big}</div>
       <div className="fact-small">{small}</div>
+    </div>
+  );
+}
+
+/**
+ * Gesamtdauer 60–240 Min in 30er-Schritten. Sieben Knöpfe passen nicht in eine
+ * Zeile, deshalb Minus/Plus mit großem Wert in der Mitte: kompakt, große
+ * Touch-Flächen, und der Standard (90 Min) ist mit einem Tipp erreichbar.
+ */
+function DurationStepper({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const i = Math.max(0, DURATION_OPTIONS.indexOf(value));
+  const prev = DURATION_OPTIONS[i - 1];
+  const next = DURATION_OPTIONS[i + 1];
+  return (
+    <div className="big-stepper" role="group" aria-labelledby="dur-label">
+      <button className="btn btn-icon" aria-label="30 Minuten weniger" disabled={prev === undefined} onClick={() => onChange(prev)}>
+        −
+      </button>
+      <div className="big-stepper-value" aria-live="polite">
+        <strong>{value} Min</strong>
+        <span className="muted small">{fmtHours(value)}</span>
+      </div>
+      <button className="btn btn-icon" aria-label="30 Minuten mehr" disabled={next === undefined} onClick={() => onChange(next)}>
+        +
+      </button>
     </div>
   );
 }

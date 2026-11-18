@@ -9,6 +9,12 @@ export const MIN_ROUND_MINUTES = 8;
 export const MAX_ROUND_MINUTES = 20;
 const MAX_ROUNDS = 40;
 
+export const MIN_PLAYERS = 4;
+export const MAX_PLAYERS = 12;
+export const COURT_OPTIONS = [1, 2, 3];
+/** 60 bis 240 Minuten in 30-Minuten-Schritten */
+export const DURATION_OPTIONS = [60, 90, 120, 150, 180, 210, 240];
+
 export interface TimeSettings {
   totalMinutes: number;
   warmupMinutes: number;

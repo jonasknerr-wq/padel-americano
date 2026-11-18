@@ -1,7 +1,7 @@
 /**
  * Turnierzustand und alle Zustandsübergänge als reine Funktionen.
  */
-import { chooseRounds, type RoundPlan } from './rounds';
+import { chooseRounds, MAX_PLAYERS, MIN_PLAYERS, type RoundPlan } from './rounds';
 import { generateSchedule, replan } from './schedule';
 import { makeResult } from './scoring';
 import { initialTimer, type TimerConfig, type TimerState } from './timer';
@@ -181,7 +181,7 @@ export function addPlayer(t: Tournament, name: string): Tournament {
   const trimmed = name.trim();
   const existing = t.players.find((p) => p.name.toLowerCase() === trimmed.toLowerCase());
   if (existing && t.activeIds.includes(existing.id)) throw new Error('Name schon vergeben');
-  if (t.activeIds.length >= 8) throw new Error('Maximal 8 Spieler');
+  if (t.activeIds.length >= MAX_PLAYERS) throw new Error(`Maximal ${MAX_PLAYERS} Spieler`);
   if (existing) return doReplan(t, [...t.activeIds, existing.id], `${existing.name} ist wieder dabei`);
   const player: Player = { id: newId(t.players), name: trimmed };
   return doReplan(t, [...t.activeIds, player.id], `${trimmed} kommt dazu`, [...t.players, player]);
@@ -221,7 +221,7 @@ export function validateNames(names: string[]): string | null {
   if (trimmed.some((n) => !n)) return 'Leere Namen sind nicht erlaubt.';
   const lower = trimmed.map((n) => n.toLowerCase());
   if (new Set(lower).size !== lower.length) return 'Jeder Name darf nur einmal vorkommen.';
-  if (trimmed.length < 4) return `Noch ${4 - trimmed.length} Spieler hinzufügen (mindestens 4).`;
-  if (trimmed.length > 8) return 'Höchstens 8 Spieler.';
+  if (trimmed.length < MIN_PLAYERS) return `Noch ${MIN_PLAYERS - trimmed.length} Spieler hinzufügen (mindestens ${MIN_PLAYERS}).`;
+  if (trimmed.length > MAX_PLAYERS) return `Höchstens ${MAX_PLAYERS} Spieler.`;
   return null;
 }

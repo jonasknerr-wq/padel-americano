@@ -1,5 +1,6 @@
 import { fmt1 } from '../format';
 import type { StandingRow } from '../logic/standings';
+import { Layout } from './Layout';
 import { StandingsLegend, StandingsTable } from './Standings';
 
 interface Props {
@@ -16,10 +17,24 @@ export function Final({ rows, inactive, onBack, onNew }: Props) {
   const order = [1, 0, 2]; // Platz 2 links, 1 Mitte, 3 rechts
 
   return (
-    <div className="page final">
-      <header className="app-header">
-        <h1>Endstand</h1>
-      </header>
+    <Layout
+      className="final"
+      header={
+        <div className="app-header">
+          <h1>Endstand</h1>
+        </div>
+      }
+      footer={
+        <div className="footer-actions">
+          <button className="btn" onClick={onBack}>
+            Zurück
+          </button>
+          <button className="btn btn-primary" onClick={onNew}>
+            Neues Turnier
+          </button>
+        </div>
+      }
+    >
       <section className="podium" aria-label="Siegerpodest">
         {order.map((i) => (
           <div key={i} className={`podium-col place-${i + 1}`}>
@@ -43,14 +58,6 @@ export function Final({ rows, inactive, onBack, onNew }: Props) {
         <StandingsTable rows={rows} inactive={inactive} />
         <StandingsLegend />
       </section>
-      <div className="stack">
-        <button className="btn" onClick={onBack}>
-          Zurück zum Turnier
-        </button>
-        <button className="btn btn-primary btn-xl" onClick={onNew}>
-          Neues Turnier
-        </button>
-      </div>
-    </div>
+    </Layout>
   );
 }
