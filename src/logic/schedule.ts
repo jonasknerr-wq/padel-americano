@@ -32,6 +32,8 @@ export interface Weights {
   sit: number;
   total: number;
   consecutive: number;
+  /** je (Abstand − Idealabstand)² zwischen zwei Pausen eines Spielers */
+  spacing: number;
   partner: number;
   opponent: number;
 }
@@ -39,13 +41,23 @@ export interface Weights {
 export const DEFAULT_WEIGHTS: Weights = {
   sit: 1e8,
   total: 1e6,
-  // Ein Doppel-Aussetzer „kostet“ etwa 1,5 Partner-Wiederholungen. Damit wird er
-  // vermieden, wo es geht – außer z. B. bei 8 Spielern auf 1 Platz, wo strikte
-  // Vermeidung zwei feste 4er-Gruppen erzwingen würde, die nie miteinander spielen.
-  consecutive: 300,
+  // Ein Doppel-Aussetzer ist teurer als jede Abstands- oder Partnerfrage und wird
+  // vermieden, wo es geht. Ausnahme: siehe HALF_SITTING_CONSECUTIVE.
+  consecutive: 1000,
+  // Pausen zeitlich gleichmäßig: 1 Runde daneben kostet 30, 2 Runden 120, 3 Runden 270.
+  // Eine zusätzliche Partner-Wiederholung kostet netto ~200 – sie lohnt sich also
+  // nur, um echte Häufungen (≥ 2 Runden daneben) aufzulösen.
+  spacing: 30,
   partner: 100,
   opponent: 1,
 };
+
+/**
+ * Setzt genau die Hälfte aus (8 Spieler auf 1 Platz), würde strikte Vermeidung von
+ * Doppel-Aussetzern zwei feste 4er-Gruppen erzwingen, die nie miteinander spielen.
+ * Dort bleibt der Doppel-Aussetzer deshalb günstiger als eine Partner-Wiederholung.
+ */
+const HALF_SITTING_CONSECUTIVE = 300;
 
 export interface ScheduleOptions {
   /** Spieler, die in den zu planenden Runden verfügbar sind */
@@ -72,6 +84,8 @@ interface Ctx {
   oppHist: Int32Array;
   pastMatches: Int32Array;
   lastSat: Uint8Array;
+  /** Runden seit der letzten Pause in der Historie (1 = in der letzten gespielten Runde), 0 = keine */
+  sinceSat: Int32Array;
 }
 
 export function generateSchedule(opts: ScheduleOptions): Round[] {
@@ -160,22 +174,29 @@ function buildContext(opts: ScheduleOptions, a: number): Ctx {
       }
     }
   }
-  if (hist.length) {
-    for (const p of hist[hist.length - 1].sitting) {
+  // Letzte Pause jedes Spielers vor dem Neuplanungszeitpunkt
+  const sinceSat = new Int32Array(n);
+  hist.forEach((r, h) => {
+    for (const p of r.sitting) {
       const i = idx.get(p);
-      if (i !== undefined) lastSat[i] = 1;
+      if (i !== undefined) sinceSat[i] = hist.length - h;
     }
-  }
+  });
+  for (let i = 0; i < n; i++) lastSat[i] = sinceSat[i] === 1 ? 1 : 0;
+
+  const w = { ...DEFAULT_WEIGHTS, ...opts.weights };
+  if (opts.weights?.consecutive === undefined && 2 * (n - 4 * a) === n) w.consecutive = HALF_SITTING_CONSECUTIVE;
   return {
     n,
     a,
     play: 4 * a,
     rounds: opts.rounds,
-    w: { ...DEFAULT_WEIGHTS, ...opts.weights },
+    w,
     partnerHist,
     oppHist,
     pastMatches,
     lastSat,
+    sinceSat,
   };
 }
 
@@ -191,7 +212,9 @@ class Search {
   private readonly rounds: number;
   private readonly w: Weights;
   private readonly lastSat: Uint8Array;
+  private readonly sinceSat: Int32Array;
   private readonly sitAt: Uint8Array; // rounds*n
+  private readonly spacingOf: Float64Array; // Abstandskosten je Spieler
   private readonly partner: Int32Array;
   private readonly opp: Int32Array;
   private readonly sit: Int32Array;
@@ -201,6 +224,7 @@ class Search {
   private sP = 0;
   private sO = 0;
   private consec = 0;
+  private sSpace = 0;
 
   constructor(ctx: Ctx, state: Int32Array[]) {
     const { n } = ctx;
@@ -209,8 +233,10 @@ class Search {
     this.rounds = state.length;
     this.w = ctx.w;
     this.lastSat = ctx.lastSat;
+    this.sinceSat = ctx.sinceSat;
     this.perm = state;
     this.sitAt = new Uint8Array(state.length * n);
+    this.spacingOf = new Float64Array(n);
     this.partner = Int32Array.from(ctx.partnerHist);
     this.opp = Int32Array.from(ctx.oppHist);
     this.sit = new Int32Array(n);
@@ -230,7 +256,14 @@ class Search {
 
   cost(): number {
     const w = this.w;
-    return w.sit * this.sSit + w.total * this.sTot + w.consecutive * this.consec + w.partner * this.sP + w.opponent * this.sO;
+    return (
+      w.sit * this.sSit +
+      w.total * this.sTot +
+      w.consecutive * this.consec +
+      w.spacing * this.sSpace +
+      w.partner * this.sP +
+      w.opponent * this.sO
+    );
   }
 
   swap(r: number, i: number, j: number): void {
@@ -299,6 +332,35 @@ class Search {
     this.sSit += d * (2 * s + d);
     this.sit[p] = s + d;
     this.sitAt[r * n + p] = v;
+    const sp = this.spacing(p);
+    this.sSpace += sp - this.spacingOf[p];
+    this.spacingOf[p] = sp;
+  }
+
+  /**
+   * Wie gleichmäßig liegen die Pausen von Spieler p? Idealabstand g = Runden / Pausen.
+   * Strafe = Σ (Abstand − g)² über alle Abstände zwischen zwei Pausen. Anfang und Ende
+   * zählen als halber Abstand (Ziel (g+1)/2), damit sich Pausen nicht am Rand häufen.
+   * Gab es vor einer Neuplanung schon eine Pause, zählt der Abstand zu ihr als voller Abstand.
+   */
+  private spacing(p: number): number {
+    const n = this.n;
+    const R = this.rounds;
+    const k = this.sit[p];
+    if (k === 0) return 0;
+    const g = R / k;
+    const edge = (g + 1) / 2;
+    let cost = 0;
+    let prev = -1;
+    for (let r = 0; r < R; r++) {
+      if (!this.sitAt[r * n + p]) continue;
+      if (prev < 0) {
+        const since = this.sinceSat[p];
+        cost += since > 0 ? (r + since - g) ** 2 : (r + 1 - edge) ** 2;
+      } else cost += (r - prev - g) ** 2;
+      prev = r;
+    }
+    return cost + (R - prev - edge) ** 2;
   }
 }
 
@@ -542,6 +604,42 @@ export interface ScheduleStats {
   consecutiveSits: number;
   maxPartnerCount: number;
   maxOpponentCount: number;
+}
+
+export interface PauseSpacing {
+  /** Mittlere Abweichung der Pausenabstände vom Idealabstand (Runden / Pausen) */
+  avgDeviation: number;
+  /** Größte Abweichung eines Pausenabstands vom Idealabstand */
+  maxDeviation: number;
+  /** Größte Abweichung, bezogen auf den Idealabstand des jeweiligen Spielers (0,5 = 50 %) */
+  maxRelDeviation: number;
+}
+
+/**
+ * Wie gleichmäßig liegen die Pausen jedes Spielers über das Turnier verteilt?
+ * Gemessen werden die Abstände zwischen zwei Pausen desselben Spielers
+ * (1 = direkt hintereinander) im Vergleich zum Idealabstand Runden / Pausen.
+ */
+export function pauseSpacing(rounds: Round[], players: PlayerId[]): PauseSpacing {
+  const R = rounds.length;
+  let sum = 0;
+  let cnt = 0;
+  let max = 0;
+  let rel = 0;
+  for (const p of players) {
+    const pos: number[] = [];
+    rounds.forEach((r, i) => r.sitting.includes(p) && pos.push(i));
+    if (pos.length < 2) continue;
+    const ideal = R / pos.length;
+    for (let i = 1; i < pos.length; i++) {
+      const dev = Math.abs(pos[i] - pos[i - 1] - ideal);
+      sum += dev;
+      cnt++;
+      max = Math.max(max, dev);
+      rel = Math.max(rel, dev / ideal);
+    }
+  }
+  return { avgDeviation: cnt ? sum / cnt : 0, maxDeviation: max, maxRelDeviation: rel };
 }
 
 export function pairKey(a: PlayerId, b: PlayerId): string {

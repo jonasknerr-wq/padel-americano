@@ -74,6 +74,19 @@ src/logic/        reine, UI-unabhängige Logik (mit Tests)
 src/components/   React-Oberfläche
 ```
 
+### Pausen zeitlich gleichmäßig verteilt
+
+Jeder Spieler hat nicht nur gleich viele Pausen, sie liegen auch möglichst gleichmäßig über den Abend verteilt. Der Idealabstand ist Runden ÷ Pausen. Bei 10 Runden und 2 Pausen pausiert jemand also z. B. in Runde 3 und 8, nicht in Runde 1 und 3.
+
+Die Planung bewertet dazu jede Abweichung vom Idealabstand mit Strafpunkten, im Quadrat: Große Häufungen sind teuer, kleine Rundungsunterschiede billig. Die Reihenfolge der Ziele:
+1. gleiche Match- und Pausenzahl,
+2. keine zwei Pausen hintereinander, wo vermeidbar,
+3. gleichmäßige Abstände,
+4. Partner-Rotation,
+5. Gegner-Rotation.
+
+Bei einer Neuplanung (Ausfall oder Nachzügler) zählen die Pausen vor dem Neuplanungszeitpunkt mit. Wer gerade pausiert hat, pausiert nicht direkt danach, und die nächste Pause kommt im passenden Abstand. Das Gewicht steht als `spacing` in `src/logic/schedule.ts`.
+
 ### Wo es keine perfekt faire Lösung gibt
 
 Alle Zahlen gelten für die Standardwerte (5 Min. Einspielen, 2 Min. Wechsel). `npm run report` gibt die komplette Tabelle für alle 4–12 Spieler, 1–3 Plätze und 60–240 Min. aus.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { activeCourts, chooseRounds, COURT_OPTIONS, DURATION_OPTIONS, MAX_PLAYERS, MIN_PLAYERS } from './rounds';
-import { generateSchedule, pairKey, replan, scheduleStats } from './schedule';
+import { generateSchedule, pairKey, pauseSpacing, replan, scheduleStats } from './schedule';
 import type { Round } from './types';
 
 const t = (total: number) => ({ totalMinutes: total, warmupMinutes: 5, changeMinutes: 2 });
@@ -57,9 +57,66 @@ describe('Spielplan für alle Kombinationen', () => {
           }
           // Partner gleichmäßig: höchstens eine Wiederholung mehr als rechnerisch nötig
           expect(st.maxPartnerCount).toBeLessThanOrEqual(Math.ceil(Math.max(...m) / (n - 1)) + 1);
+
+          // Pausen zeitlich gleichmäßig (siehe Beschreibung 'Pausen zeitlich verteilt')
+          expectEvenPauses(rounds, players);
         });
       }
     }
+});
+
+/**
+ * Abstands-Kennzahl im Rahmen: Kein Abstand zwischen zwei Pausen eines Spielers
+ * weicht um mehr als 75 % vom Idealabstand (Runden / Pausen) ab, im Mittel um
+ * höchstens 1,2 Runden. Vor der Optimierung lagen die Werte bei bis zu 233 % bzw. 5,6 Runden.
+ */
+function expectEvenPauses(rounds: Round[], players: string[]) {
+  const sp = pauseSpacing(rounds, players);
+  expect(sp.maxRelDeviation).toBeLessThanOrEqual(0.75);
+  expect(sp.avgDeviation).toBeLessThanOrEqual(1.2);
+}
+
+describe('Pausen zeitlich verteilt', () => {
+  // Typische Fälle mit Aussetzern; „Neu mischen“ = anderer Seed → jeder Plan muss passen
+  const cases: [number, number, number][] = [
+    [5, 1, 120],
+    [6, 1, 120],
+    [7, 1, 90],
+    [9, 2, 120],
+    [10, 2, 120],
+    [11, 2, 120],
+    [11, 3, 240],
+    [10, 1, 120],
+  ];
+  for (const [n, courts, total] of cases) {
+    it(`${n} Spieler, ${courts} Plätze, ${total} Min: 20× gemischt, keine vermeidbare Doppelpause, Abstände im Rahmen`, () => {
+      const plan = chooseRounds(n, courts, t(total));
+      const players = names(n);
+      const s = plan.sittingPerRound;
+      const minDbl = 2 * s > n ? (plan.rounds - 1) * (2 * s - n) : 0;
+      for (let seed = 1; seed <= 20; seed++) {
+        const rounds = generateSchedule({ players, rounds: plan.rounds, courts, seed });
+        const st = scheduleStats(rounds, players);
+        if (minDbl === 0) expect(st.consecutiveSits).toBe(0);
+        else expect(st.consecutiveSits).toBeLessThanOrEqual(minDbl + 3);
+        expectEvenPauses(rounds, players);
+        expect(new Set(Object.values(st.sits)).size).toBeLessThanOrEqual(plan.fair ? 1 : 2);
+      }
+    });
+  }
+
+  it('Beispiel 10 Spieler / 2 Plätze / 10 Runden: Pausen 4–6 Runden auseinander (ideal 5, vorher teils 2)', () => {
+    const players = names(10);
+    for (let seed = 1; seed <= 10; seed++) {
+      const rounds = generateSchedule({ players, rounds: 10, courts: 2, seed });
+      for (const p of players) {
+        const pos = rounds.flatMap((r, i) => (r.sitting.includes(p) ? [i] : []));
+        expect(pos).toHaveLength(2);
+        expect(pos[1] - pos[0]).toBeGreaterThanOrEqual(4);
+        expect(pos[1] - pos[0]).toBeLessThanOrEqual(6);
+      }
+    }
+  });
 });
 
 describe('12 Spieler, 3 Plätze', () => {
@@ -112,6 +169,14 @@ describe('Rechenzeit', () => {
       generateSchedule({ players: names(n), rounds: plan.rounds, courts, seed: 1 });
       // Am PC ≤ ~100 ms; 400 ms lassen Luft für langsame Test-Rechner.
       expect(performance.now() - start).toBeLessThan(400);
+    }
+  });
+
+  it('größter Fall 12 Spieler / 3 Plätze / 240 Min inkl. Pausen-Optimierung deutlich unter 1 s', () => {
+    for (const seed of [1, 2, 3]) {
+      const start = performance.now();
+      generateSchedule({ players: names(12), rounds: chooseRounds(12, 3, t(240)).rounds, courts: 3, seed });
+      expect(performance.now() - start).toBeLessThan(1000);
     }
   });
 });
@@ -213,6 +278,45 @@ describe('Neuplanung', () => {
     const back = replan({ rounds: re, fromRound: 10, players, courts: 3, seed: 23 });
     for (const r of back.slice(10)) expect(r.matches).toHaveLength(3);
     assertNoDuplicates(back.slice(10), players);
+  });
+
+  it('Pausen über die Neuplanungsgrenze hinweg: keine Doppelpause, nächste Pause nicht zu früh und nicht zu spät', () => {
+    // 11 Spieler / 2 Plätze / 11 Runden (3 Aussetzer je Runde) → Ausfall nach Runde 5 → 10 Spieler, 2 Aussetzer
+    const players = names(11);
+    for (let seed = 1; seed <= 15; seed++) {
+      const full = generateSchedule({ players, rounds: 11, courts: 2, seed });
+      const ten = players.filter((p) => p !== 'S4');
+      const re = replan({ rounds: full, fromRound: 5, players: ten, courts: 2, seed: seed + 100 });
+      // Wer in der letzten gespielten Runde pausiert hat, pausiert nicht direkt danach
+      for (const p of re[4].sitting) expect(re[5].sitting).not.toContain(p);
+      // Über den ganzen Abend gezählt: keine Doppelpause, Abstand zur letzten Pause sinnvoll
+      expect(scheduleStats(re, ten).consecutiveSits).toBe(0);
+      const ideal = 6 / ((6 * 2) / 10); // Rest: 6 Runden, 2 Aussetzer, 10 Spieler → Abstand 5
+      for (const p of ten) {
+        const before = re.slice(0, 5).flatMap((r, i) => (r.sitting.includes(p) ? [i] : []));
+        const after = re.slice(5).flatMap((r, i) => (r.sitting.includes(p) ? [i + 5] : []));
+        if (before.length && after.length) {
+          const gap = after[0] - before[before.length - 1];
+          expect(gap).toBeGreaterThanOrEqual(2);
+          expect(gap).toBeLessThanOrEqual(Math.ceil(ideal) + 2);
+        }
+      }
+    }
+  });
+
+  it('Nachzügler: Pausen der Bisherigen laufen über die Grenze gleichmäßig weiter', () => {
+    // 9 Spieler / 2 Plätze (1 Aussetzer) → Nachzügler nach Runde 3 → 10 Spieler, 2 Aussetzer
+    const players = names(9);
+    for (let seed = 1; seed <= 10; seed++) {
+      const full = generateSchedule({ players, rounds: 10, courts: 2, seed });
+      const withNew = [...players, 'NEU'];
+      const re = replan({ rounds: full, fromRound: 3, players: withNew, courts: 2, seed: seed + 50 });
+      for (const p of re[2].sitting) expect(re[3].sitting).not.toContain(p);
+      expect(scheduleStats(re, withNew).consecutiveSits).toBe(0);
+      // Über den ganzen Abend gemessen (inkl. der Pausen vor der Neuplanung)
+      expectEvenPauses(re, players);
+      expect(pauseSpacing(re, players).maxRelDeviation).toBeLessThanOrEqual(0.5);
+    }
   });
 
   it('Neuplanung mit 12 Spielern ist schnell', () => {
