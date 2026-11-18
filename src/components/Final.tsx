@@ -5,12 +5,14 @@ import { StandingsLegend, StandingsTable } from './Standings';
 
 interface Props {
   rows: StandingRow[];
+  /** klassischer Americano: echte Punkte statt normierter */
+  classic?: boolean;
   inactive: Set<string>;
   onBack: () => void;
   onNew: () => void;
 }
 
-export function Final({ rows, inactive, onBack, onNew }: Props) {
+export function Final({ rows, inactive, classic = false, onBack, onNew }: Props) {
   const ranked = rows.filter((r) => r.matches > 0);
   const podium = [1, 2, 3].map((place) => ranked.filter((r) => r.rank === place));
   // Bei geteiltem Platz rutschen die folgenden Plätze nach (1, 1, 3 …)
@@ -55,8 +57,8 @@ export function Final({ rows, inactive, onBack, onNew }: Props) {
         ))}
       </section>
       <section className="card">
-        <StandingsTable rows={rows} inactive={inactive} />
-        <StandingsLegend />
+        <StandingsTable rows={rows} inactive={inactive} classic={classic} />
+        <StandingsLegend classic={classic} />
       </section>
     </Layout>
   );

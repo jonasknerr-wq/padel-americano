@@ -1,8 +1,9 @@
 import { fmt1 } from '../format';
-import { playerName, type Tournament } from '../logic/tournament';
+import { isClassic, playerName, type Tournament } from '../logic/tournament';
 
 export function Matches({ t, openResult }: { t: Tournament; openResult: (round: number, court: number) => void }) {
   const name = (id: string) => playerName(t, id);
+  const classic = isClassic(t);
   const editableUpTo = t.timer.phase === 'done' || t.finished ? t.rounds.length - 1 : t.timer.round;
 
   return (
@@ -52,9 +53,11 @@ export function Matches({ t, openResult }: { t: Tournament; openResult: (round: 
                         <span className="raw">
                           {m.result.rawA} : {m.result.rawB}
                         </span>
-                        <span className="norm">
-                          {fmt1(m.result.normA)} : {fmt1(m.result.normB)}
-                        </span>
+                        {!classic && (
+                          <span className="norm">
+                            {fmt1(m.result.normA)} : {fmt1(m.result.normB)}
+                          </span>
+                        )}
                       </>
                     ) : editable ? (
                       <span className="enter">Eintragen ›</span>
@@ -69,7 +72,11 @@ export function Matches({ t, openResult }: { t: Tournament; openResult: (round: 
           </section>
         );
       })}
-      <p className="muted small center">Oben: Rohergebnis (Ballwechsel) · darunter: normiert auf {t.settings.pointSum}</p>
+      <p className="muted small center">
+        {classic
+          ? `Klassischer Americano: jedes Match bis ${t.settings.pointSum} Punkte.`
+          : `Oben: Rohergebnis (Ballwechsel) · darunter: normiert auf ${t.settings.pointSum}`}
+      </p>
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { courtsChange, courtsNote } from '../format';
 import { activeCourts, MAX_PLAYERS } from '../logic/rounds';
 import { scheduleStats } from '../logic/schedule';
-import { replanFrom, type Tournament } from '../logic/tournament';
+import { isClassic, replanFrom, type Tournament } from '../logic/tournament';
 import type { Theme } from '../store';
 import { useConfirm } from './Dialog';
 
@@ -158,7 +158,9 @@ export function Players({ t, theme, setTheme, onDrop, onDropAndFinish, onAdd, on
       <section className="card">
         <h2>Turnier</h2>
         <p className="muted small">
-          {t.plan.rounds} Runden à {t.plan.roundMinutes} Min. · Punktsumme {t.settings.pointSum} · Seed {t.seed}
+          {isClassic(t)
+            ? `Klassisch · ${t.rounds.length} Runden · bis ${t.settings.pointSum} Punkte · Seed ${t.seed}`
+            : `${t.plan.rounds} Runden à ${t.plan.roundMinutes} Min. · Punktsumme ${t.settings.pointSum} · Seed ${t.seed}`}
         </p>
         <div className="stack">
           <button

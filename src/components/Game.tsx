@@ -1,6 +1,7 @@
 import { fmt1, fmtClock } from '../format';
-import { pause, remaining, resetPhase, skip, start, type TimerConfig } from '../logic/timer';
-import { missingResults, playerName, type Tournament } from '../logic/tournament';
+import { serveRule } from '../logic/classic';
+import { elapsed, isCountUp, pause, phaseStarted, remaining, resetPhase, skip, start, type TimerConfig } from '../logic/timer';
+import { isClassic, missingResults, playerName, type Tournament } from '../logic/tournament';
 import type { Round } from '../logic/types';
 import { unlockAudio } from '../device';
 import { useConfirm } from './Dialog';
@@ -19,11 +20,15 @@ const PHASE_LABEL = { warmup: 'Einspielen', round: 'Runde', change: 'Wechsel', d
 export function Game({ t, cfg, now, setTimer, openResult, onFinish }: Props) {
   const ask = useConfirm();
   const { timer } = t;
+  const classic = isClassic(t);
+  const countUp = isCountUp(timer);
   const rem = remaining(timer, now);
   const total = t.rounds.length;
   const progress = timer.durationSec > 0 ? 1 - rem / timer.durationSec : 1;
-  const warn = timer.phase === 'round' && rem <= 60 && timer.durationSec > 60;
-  const notStarted = !timer.running && rem === timer.durationSec;
+  const warn = !countUp && timer.phase === 'round' && rem <= 60 && timer.durationSec > 60;
+  const notStarted = !phaseStarted(timer);
+  const currentRound = t.rounds[timer.round];
+  const courtsDone = currentRound ? currentRound.matches.filter((m) => m.result).length : 0;
 
   // Fehlende Ergebnisse aus bereits gespielten Runden
   const lastPlayed = timer.phase === 'done' ? total - 1 : timer.round - 1;
@@ -48,7 +53,11 @@ export function Game({ t, cfg, now, setTimer, openResult, onFinish }: Props) {
 
   const doSkip = async () => {
     const what = timer.phase === 'round' ? `Runde ${timer.round + 1} beenden` : `${PHASE_LABEL[timer.phase]} überspringen`;
-    if (await ask({ title: `${what}?`, confirm: 'Weiter' })) setTimer((x) => ({ ...x, timer: skip(x.timer, cfg, Date.now()) }));
+    const text =
+      countUp && courtsDone < (currentRound?.matches.length ?? 0) ? (
+        <p>Noch nicht alle Plätze haben ein Ergebnis. Fehlende Ergebnisse kannst du später nachtragen.</p>
+      ) : undefined;
+    if (await ask({ title: `${what}?`, text, confirm: 'Weiter' })) setTimer((x) => ({ ...x, timer: skip(x.timer, cfg, Date.now()) }));
   };
 
   return (
@@ -57,12 +66,25 @@ export function Game({ t, cfg, now, setTimer, openResult, onFinish }: Props) {
         <div className="timer-title">{title}</div>
         {timer.phase !== 'done' ? (
           <>
-            <div className="timer-clock" aria-live="off">
-              {fmtClock(rem)}
-            </div>
-            <div className="progress" aria-hidden>
-              <div style={{ width: `${Math.min(100, progress * 100)}%` }} />
-            </div>
+            {countUp ? (
+              <>
+                <div className="timer-clock count-up" aria-live="off">
+                  {fmtClock(Math.floor(elapsed(timer, now)))}
+                </div>
+                <div className="timer-sub">
+                  Rundenzeit · {courtsDone} von {currentRound?.matches.length ?? 0} {currentRound?.matches.length === 1 ? 'Platz' : 'Plätzen'} fertig
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="timer-clock" aria-live="off">
+                  {fmtClock(rem)}
+                </div>
+                <div className="progress" aria-hidden>
+                  <div style={{ width: `${Math.min(100, progress * 100)}%` }} />
+                </div>
+              </>
+            )}
             {warn && <div className="timer-warn">Noch 1 Minute!</div>}
             <div className="timer-actions">
               <button className="btn btn-primary btn-xl grow" onClick={toggle}>
@@ -76,7 +98,14 @@ export function Game({ t, cfg, now, setTimer, openResult, onFinish }: Props) {
               </button>
             </div>
             {notStarted && timer.phase === 'warmup' && timer.round === 0 && (
-              <p className="muted small center">Tippe auf Start, um das Einspielen zu beginnen. Danach laufen Runden und Wechsel automatisch.</p>
+              <p className="muted small center">
+                {classic
+                  ? `Tippe auf Start, um das Einspielen zu beginnen. Danach läuft pro Runde eine Uhr mit. Eine Runde ist vorbei, sobald für alle Plätze das Ergebnis eingetragen ist.`
+                  : 'Tippe auf Start, um das Einspielen zu beginnen. Danach laufen Runden und Wechsel automatisch.'}
+              </p>
+            )}
+            {notStarted && countUp && (
+              <p className="muted small center">Tippe auf Start, sobald die Runde losgeht. Sie endet, wenn alle Ergebnisse eingetragen sind.</p>
             )}
           </>
         ) : (
@@ -104,7 +133,15 @@ export function Game({ t, cfg, now, setTimer, openResult, onFinish }: Props) {
       )}
 
       {current && timer.phase !== 'done' && (
-        <RoundCard t={t} round={current} index={timer.round} heading={timer.phase === 'round' ? 'Jetzt' : 'Als Nächstes'} openResult={openResult} big />
+        <RoundCard
+          t={t}
+          round={current}
+          index={timer.round}
+          heading={timer.phase === 'round' ? 'Jetzt' : 'Als Nächstes'}
+          openResult={openResult}
+          big
+          live={timer.phase === 'round'}
+        />
       )}
       {next && <RoundCard t={t} round={next} index={timer.round + 1} heading="Danach" />}
     </div>
@@ -118,6 +155,7 @@ export function RoundCard({
   heading,
   openResult,
   big,
+  live = false,
 }: {
   t: Tournament;
   round: Round;
@@ -125,17 +163,32 @@ export function RoundCard({
   heading: string;
   openResult?: (round: number, court: number) => void;
   big?: boolean;
+  /** Runde läuft gerade → pro Platz „läuft“ / „✓ fertig“ anzeigen (klassisch) */
+  live?: boolean;
 }) {
   const name = (id: string) => playerName(t, id);
+  const classic = isClassic(t);
+  const serve = classic ? serveRule(t.settings.pointSum) : null;
   return (
     <section className={`card round-card ${big ? 'big' : 'small-card'}`}>
       <h2>
         {heading}: Runde {index + 1}
       </h2>
+      {big && serve && (
+        <p className="serve-hint">
+          🎾 Bis {t.settings.pointSum} Punkte · Aufschlagwechsel alle <strong>{serve.every}</strong> Punkte
+          {serve.exact ? ` – jeder schlägt ${serve.minTurns}× auf.` : ` – nicht ganz gleich: einer schlägt einmal weniger auf.`}
+        </p>
+      )}
       <div className="courts">
         {round.matches.map((m) => (
-          <div key={m.court} className="court">
-            {round.matches.length > 1 || t.settings.courts > 1 ? <div className="court-label">Platz {m.court + 1}</div> : null}
+          <div key={m.court} className={`court ${classic && live && m.result ? 'court-done' : ''}`}>
+            {round.matches.length > 1 || t.settings.courts > 1 ? (
+              <div className="court-label">
+                Platz {m.court + 1}
+                {classic && live && <span className={`court-state ${m.result ? 'done' : ''}`}>{m.result ? '✓ fertig' : 'läuft'}</span>}
+              </div>
+            ) : null}
             <div className="team">
               {name(m.teamA[0])} & {name(m.teamA[1])}
             </div>
@@ -143,10 +196,12 @@ export function RoundCard({
               {m.result ? (
                 <span className="score-chip">
                   {m.result.rawA} : {m.result.rawB}
-                  <small>
-                    {' '}
-                    ({fmt1(m.result.normA)} : {fmt1(m.result.normB)})
-                  </small>
+                  {!classic && (
+                    <small>
+                      {' '}
+                      ({fmt1(m.result.normA)} : {fmt1(m.result.normB)})
+                    </small>
+                  )}
                 </span>
               ) : (
                 'gegen'

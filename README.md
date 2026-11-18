@@ -2,7 +2,39 @@
 
 Mobile Web-App (PWA) für Padel-Americano-Abende mit 4–12 Spielern auf 1–3 Plätzen und 60–240 Minuten. Sie läuft komplett auf einem Handy, ohne Backend und ohne Accounts, und funktioniert offline.
 
+**Zwei Spielmodi:** Zeit-Modus (feste Gesamtdauer, Runden mit Countdown) und klassischer Americano (jedes Match bis zu einer festen Punktzahl). Details unten.
+
 **Funktionen:** Spielplan mit gleichmäßigen Aussetzern und Partner-Rotation, Countdown für Einspielen, Runden und Wechsel (mit Ton, Vibration und Wake Lock), Ergebniseingabe mit großen +/−-Buttons, Normierung auf eine feste Punktsumme, Live-Tabelle nach Ø Punkten, Korrektur und Rückgängig, Neuplanung bei Ausfall oder Nachzügler, Endstand mit Siegerpodest.
+
+## Spielmodi
+
+Der Modus wird vor dem Start im Setup gewählt und gilt für das ganze Turnier. In der Kopfzeile steht, welcher Modus und welches Punktziel gilt.
+
+### Zeit-Modus (Standard)
+
+Ihr legt die Gesamtdauer fest (60–240 Min.), und die App teilt sie in Runden mit Countdown auf. Gezählt wird jeder Ballwechsel. Am Ende jedes Matches rechnet die App das Ergebnis auf eine feste Punktsumme um (Standard 24), damit lange und kurze Matches vergleichbar sind.
+
+### Klassischer Americano
+
+Jedes Match geht bis zu einer festen Gesamtpunktzahl **S** (16, 21, 24 oder 32, Standard 24), z. B. 15:9 oder 12:12. Jeder Spieler bekommt die Punkte seines Teams. Es gibt keine Gesamtdauer und keine Umrechnung.
+
+- **Ergebnis:** Du gibst die Punkte eines Teams ein, das andere wird automatisch S minus diesem Wert. Eine andere Summe ist nicht möglich.
+- **Ablauf:** Das Einspielen läuft als Countdown. Danach zeigt jede Runde eine Uhr, die hochzählt (wie lange die Runde schon läuft). Eine Runde endet, sobald für alle Plätze ein Ergebnis eingetragen ist. Dann startet automatisch die Wechselzeit. Bei mehreren Plätzen steht an jedem Platz „läuft“ oder „✓ fertig“.
+- **Aufschlag:** Die App zeigt einen Aufschlagwechsel alle S ÷ 8 Punkte (16 → 2, 24 → 3, 32 → 4), dann schlägt jeder genau zweimal auf. Bei 21 sind es alle 3 Punkte, dann schlägt einer einmal weniger auf.
+- **Tabelle:** Sortiert wird nach Ø Punkten pro Match. Haben alle gleich viele Matches, ist das dieselbe Reihenfolge wie nach Gesamtpunkten. Nach Ausfällen oder mit Nachzüglern ist der Ø fairer. Die Spalte „Punkte“ zeigt die echten Gesamtpunkte.
+
+**Rundenzahl.** Vorgeschlagen wird die „volle Rotation“, damit jeder einmal mit jedem zusammenspielt. Dafür braucht es Spieler × (Spieler − 1) ÷ (4 × Plätze) Runden. Ohne Aussetzer ist das Spielerzahl − 1. Mit −/+ lässt sich die Zahl anpassen, z. B. wenn die Platzbuchung kürzer ist.
+
+| Rotation | Fälle |
+|---|---|
+| **perfekt, jeder 1× mit und 2× gegen jeden** („Whist“) | 4 Spieler/1 Platz (3 Runden), 8 Spieler/2 Plätze (7), 12 Spieler/3 Plätze (11). Feste Konstruktion, gilt bei jeder Mischung. |
+| **volle Partner-Rotation mit Aussetzern** | 5 Spieler/1 Platz (5 Runden), 9 Spieler/2 Plätze (9). Gegner sind dabei nicht ganz gleich verteilt. |
+| **nicht perfekt möglich** | z. B. 6, 7, 10, 11 Spieler. Der Vorschlag ist die nächstgelegene Rundenzahl, bei der alle gleich oft spielen. Ein Hinweis zeigt, dass nicht jeder mit jedem spielt. |
+| **gekürzt** | Würde die volle Rotation länger als ca. 3 Stunden dauern (z. B. 8 Spieler/1 Platz: 14 Runden, 12 Spieler/1 Platz: 33 Runden), schlägt die App die längste faire Rundenzahl darunter vor und sagt das. |
+
+**Dauer – nur eine Schätzung.** Matchdauer ≈ 3,5 Min. + 0,31 Min. pro Punkt (16 → 8,5 · 21 → 10 · 24 → 11 · 32 → 13,5 Min.). Abgeleitet ist das aus den Richtwerten „24 Punkte ≈ 10–12 Min., 32 Punkte ≈ 12–15 Min.“. Gesamt ≈ Einspielen + Runden × Matchdauer + Wechselzeiten, gerundet auf 5 Minuten. Beispiel: 8 Spieler, 2 Plätze, 24 Punkte → 7 Runden · ca. 1:35 h. Wie lange ein Match wirklich dauert, hängt vom Niveau ab. Bei mehreren Plätzen bestimmt das langsamste Match die Runde.
+
+Neuplanung bei Ausfall oder Nachzügler, Rückgängig, Pausenverteilung und Wake Lock funktionieren in beiden Modi gleich.
 
 ## Lokal starten
 
@@ -69,7 +101,8 @@ src/logic/        reine, UI-unabhängige Logik (mit Tests)
   schedule.ts     Spielplan (Simulated Annealing + Konstruktion für 8/2 und 12/3), Neuplanung
   scoring.ts      Normierung auf die Punktsumme
   standings.ts    Tabelle inkl. Tiebreaker
-  timer.ts        Timer als Zustandsmaschine
+  classic.ts      klassischer Modus: Rundenzahl, Dauer-Schätzung, Aufschlag
+  timer.ts        Timer als Zustandsmaschine (Countdown bzw. hochzählende Runde)
   tournament.ts   Turnierzustand: Ergebnisse, Rückgängig, Ausfall/Nachzügler
 src/components/   React-Oberfläche
 ```

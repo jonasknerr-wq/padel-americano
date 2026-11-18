@@ -1,27 +1,52 @@
 /**
  * Turnierzustand und alle Zustandsübergänge als reine Funktionen.
  */
+import { classicDefaultRounds, describeClassic } from './classic';
 import { chooseRounds, MAX_PLAYERS, MIN_PLAYERS, type RoundPlan } from './rounds';
 import { generateSchedule, replan } from './schedule';
 import { makeResult } from './scoring';
-import { initialTimer, type TimerConfig, type TimerState } from './timer';
+import { finishRound, initialTimer, phaseStarted, type TimerConfig, type TimerState } from './timer';
 import type { Player, PlayerId, Round } from './types';
 
+/**
+ * 'time'    = Zeit-Modus: Gesamtdauer, Runden mit Countdown, Rallye-Zählung, Normierung auf pointSum.
+ * 'classic' = Klassischer Americano: jedes Match bis pointSum Punkte, keine Normierung.
+ */
+export type GameMode = 'time' | 'classic';
+
 export interface Settings {
+  mode: GameMode;
   totalMinutes: number;
   courts: number;
   warmupMinutes: number;
   changeMinutes: number;
+  /** Zeit-Modus: Normierungssumme. Klassisch: Punktziel S pro Match. */
   pointSum: number;
+  /** Nur klassisch: gewählte Rundenzahl, null = Standard (volle Rotation) */
+  classicRounds: number | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  mode: 'time',
   totalMinutes: 90,
   courts: 2,
   warmupMinutes: 5,
   changeMinutes: 2,
   pointSum: 24,
+  classicRounds: null,
 };
+
+/** Fehlende Felder (z. B. aus älteren Speicherständen) mit Standardwerten auffüllen → Zeit-Modus. */
+export function withSettingsDefaults(s: Partial<Settings> | undefined): Settings {
+  return { ...DEFAULT_SETTINGS, ...s };
+}
+
+/** Älteren gespeicherten Turnierstand auf das aktuelle Format bringen. */
+export function migrateTournament(t: Tournament): Tournament {
+  return { ...t, settings: withSettingsDefaults(t.settings) };
+}
+
+export const isClassic = (t: Pick<Tournament, 'settings'>) => t.settings.mode === 'classic';
 
 export interface Replanning {
   fromRound: number;
@@ -56,15 +81,24 @@ export interface Tournament extends Snapshot {
 const MAX_UNDO = 30;
 
 export function timerConfig(t: Pick<Tournament, 'settings' | 'plan' | 'rounds'>): TimerConfig {
+  const classic = t.settings.mode === 'classic';
   return {
     rounds: t.rounds.length,
     warmupSec: Math.round(t.settings.warmupMinutes * 60),
-    roundSec: Math.round(t.plan.roundMinutes * 60),
+    roundSec: classic ? 0 : Math.round(t.plan.roundMinutes * 60),
     changeSec: Math.round(t.settings.changeMinutes * 60),
+    countUp: classic,
   };
 }
 
+/** Rundenzahl im klassischen Modus: gewählt oder Standard (volle Rotation). */
+export function classicRoundsFor(playerCount: number, s: Settings): number {
+  if (s.classicRounds && s.classicRounds > 0) return s.classicRounds;
+  return classicDefaultRounds(playerCount, s.courts, s.pointSum, s).rounds;
+}
+
 export function planFor(playerCount: number, s: Settings): RoundPlan {
+  if (s.mode === 'classic') return describeClassic(playerCount, s.courts, classicRoundsFor(playerCount, s), s.pointSum);
   return chooseRounds(playerCount, s.courts, {
     totalMinutes: s.totalMinutes,
     warmupMinutes: s.warmupMinutes,
@@ -121,12 +155,32 @@ export function playerName(t: Pick<Tournament, 'players'>, id: PlayerId): string
   return t.players.find((p) => p.id === id)?.name ?? '?';
 }
 
-export function setResult(t: Tournament, round: number, court: number, rawA: number, rawB: number): Tournament {
+/** Prüft ein klassisches Ergebnis: ganze Zahlen 0…S, Summe genau S. Gibt Fehlertext oder null zurück. */
+export function validateClassicResult(a: number, b: number, total: number): string | null {
+  if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0) return 'Punkte müssen ganze Zahlen ab 0 sein.';
+  if (a + b !== total) return `Die Summe muss genau ${total} sein.`;
+  return null;
+}
+
+/**
+ * Ergebnis speichern. Klassischer Modus: Summe muss S sein (sonst Fehler). Ist danach
+ * jedes Match der laufenden Runde eingetragen, endet die Runde automatisch und die
+ * Wechselzeit startet (Timer ist nicht Teil von „Rückgängig“).
+ */
+export function setResult(t: Tournament, round: number, court: number, rawA: number, rawB: number, now = Date.now()): Tournament {
+  if (isClassic(t)) {
+    const err = validateClassicResult(rawA, rawB, t.settings.pointSum);
+    if (err) throw new Error(err);
+  }
   const result = makeResult(rawA, rawB, t.settings.pointSum);
   const rounds = t.rounds.map((r, ri) =>
     ri !== round ? r : { ...r, matches: r.matches.map((m) => (m.court === court ? { ...m, result } : m)) },
   );
-  return withUndo(t, `Ergebnis Runde ${round + 1}, Platz ${court + 1}`, { rounds });
+  const next = withUndo(t, `Ergebnis Runde ${round + 1}, Platz ${court + 1}`, { rounds });
+  if (isClassic(t) && rounds[round].matches.every((m) => m.result)) {
+    return { ...next, timer: finishRound(next.timer, round, timerConfig(next), now) };
+  }
+  return next;
 }
 
 export function clearResult(t: Tournament, round: number, court: number): Tournament {
@@ -153,7 +207,7 @@ export function replanFrom(t: Tournament): number {
   const { timer } = t;
   if (timer.phase === 'done') return t.rounds.length;
   const r = timer.round;
-  const started = timer.phase === 'round' && (timer.running || timer.remainingSec < timer.durationSec);
+  const started = timer.phase === 'round' && phaseStarted(timer);
   const hasResult = t.rounds[r]?.matches.some((m) => m.result);
   return started || hasResult ? r + 1 : r;
 }
@@ -224,4 +278,9 @@ export function validateNames(names: string[]): string | null {
   if (trimmed.length < MIN_PLAYERS) return `Noch ${MIN_PLAYERS - trimmed.length} Spieler hinzufügen (mindestens ${MIN_PLAYERS}).`;
   if (trimmed.length > MAX_PLAYERS) return `Höchstens ${MAX_PLAYERS} Spieler.`;
   return null;
+}
+
+/** Kurzbeschreibung für die Kopfzeile, z. B. „Klassisch · bis 24 Punkte“. */
+export function modeLabel(s: Settings): string {
+  return s.mode === 'classic' ? `Klassisch · bis ${s.pointSum} Punkte` : `Zeit-Modus · normiert auf ${s.pointSum}`;
 }

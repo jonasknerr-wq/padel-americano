@@ -17,6 +17,8 @@ import {
   clearResult,
   dropPlayer,
   finishTournament,
+  isClassic,
+  modeLabel,
   reopenTournament,
   setResult,
   timerConfig,
@@ -77,6 +79,7 @@ function Shell({ state, update }: { state: AppState; update: (fn: (s: AppState) 
       <Final
         rows={rows}
         inactive={new Set(t.players.filter((p) => !t.activeIds.includes(p.id)).map((p) => p.id))}
+        classic={isClassic(t)}
         onBack={() => setT(reopenTournament)}
         onNew={newTournament}
       />
@@ -174,7 +177,10 @@ function Running({
               ↶ Rückgängig
             </button>
           </div>
-          {lastUndo && <div className="undo-hint">Zuletzt: {lastUndo.label}</div>}
+          <div className="header-sub">
+            <span className="mode-badge">{modeLabel(t.settings)}</span>
+            {lastUndo && <span className="undo-hint">Zuletzt: {lastUndo.label}</span>}
+          </div>
         </>
       }
       footer={tabbar}
@@ -192,8 +198,8 @@ function Running({
         {tab === 'table' && (
           <section className="card">
             <h2>Live-Tabelle</h2>
-            <StandingsTable rows={rows} inactive={inactive} />
-            <StandingsLegend />
+            <StandingsTable rows={rows} inactive={inactive} classic={isClassic(t)} />
+            <StandingsLegend classic={isClassic(t)} />
           </section>
         )}
         {tab === 'matches' && <Matches t={t} openResult={(round, court) => setEditing({ round, court })} />}
